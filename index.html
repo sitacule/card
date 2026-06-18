@@ -123,12 +123,27 @@
   .toggle-auth a{color:var(--primary); cursor:pointer; font-weight:700;}
   .setup{font-size:13px; line-height:1.7; color:var(--text);}
   .setup code{background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:12px;}
+
+  /* 동기화 오류 배너 */
+  #syncBanner{display:none; background:#fef2f2; color:var(--danger); border:1px solid #fecaca;
+    border-radius:10px; padding:10px 12px; font-size:13px; margin:0 0 14px;}
+  #syncBanner.show{display:block;}
+  /* 실행취소 토스트 */
+  #toast{position:fixed; left:50%; bottom:84px; transform:translateX(-50%); z-index:60;
+    background:#1e293b; color:#fff; padding:10px 14px; border-radius:10px; font-size:13px;
+    display:none; align-items:center; gap:12px; box-shadow:0 4px 14px rgba(0,0,0,.25);}
+  #toast.show{display:flex;}
+  #toast a{color:#93c5fd; font-weight:700; cursor:pointer;}
+  /* 목록 검색/필터 */
+  .list-tools input, .list-tools select{
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px; font-size:14px; background:#fff;}
 </style>
 
 <!-- Firebase (compat SDK) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <!-- Tesseract.js OCR (무료, 브라우저 내장) -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -163,6 +178,14 @@
         본인 Firebase 프로젝트 설정값으로 교체해야 합니다. (아래 안내 참고)
       </div>
     </div>
+    <div id="verifyNotice" style="display:none;">
+      <h2>이메일 인증 필요</h2>
+      <p class="sub"><b id="verifyEmail"></b> 로 인증 메일을 보냈습니다.<br>메일의 링크를 클릭한 뒤 아래 버튼을 누르세요.</p>
+      <button class="btn btn-primary" id="btnVerified">인증 완료 · 새로고침</button>
+      <div class="toggle-auth"><a id="resendLink">인증 메일 다시 보내기</a></div>
+      <div class="toggle-auth"><a id="verifyLogout">다른 계정으로 로그인</a></div>
+      <div id="verifyMsg" style="font-size:13px; margin-top:10px;"></div>
+    </div>
   </div>
 </div>
 
@@ -180,6 +203,7 @@
 </header>
 
 <main>
+  <div id="syncBanner"></div>
   <!-- ============ 촬영/인식 화면 ============ -->
   <section id="view-scan" class="view active">
     <div class="card">
@@ -265,9 +289,20 @@
       <div class="box"><b id="sumAmount">0</b><span>총 금액(원)</span></div>
       <div class="box"><b id="sumMonth">0</b><span>이번달(원)</span></div>
     </div>
-    <div class="card" style="padding:12px;">
-      <div class="btn-group">
-        <button class="btn btn-ghost btn-sm" id="btnExport">📤 CSV 내보내기</button>
+    <div class="card list-tools" style="padding:12px;">
+      <input id="listSearch" placeholder="🔍 가맹점·메모·동석자·회사명 검색">
+      <div class="row" style="margin-top:8px;">
+        <input type="month" id="listMonth" title="월 필터(비우면 전체)">
+        <select id="listSort">
+          <option value="new">최신순</option>
+          <option value="old">오래된순</option>
+          <option value="amtdesc">금액 높은순</option>
+          <option value="amtasc">금액 낮은순</option>
+        </select>
+      </div>
+      <div class="btn-group" style="margin-top:10px;">
+        <button class="btn btn-ghost btn-sm" id="btnExport">📤 CSV</button>
+        <button class="btn btn-ghost btn-sm" id="btnBackup">💾 전체 백업(JSON)</button>
       </div>
     </div>
     <div id="list"><div class="empty">불러오는 중...</div></div>
@@ -305,6 +340,9 @@
   </button>
 </nav>
 </div><!-- /#app -->
+
+<!-- 실행취소 토스트 -->
+<div id="toast"><span id="toastMsg"></span><a id="toastUndo">실행취소</a></div>
 
 <!-- 이미지 확대 모달 -->
 <div class="modal" id="modalImage">
@@ -344,7 +382,7 @@ function thisMonthLocal(){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
-let db = null, auth = null, uid = null;
+let db = null, auth = null, uid = null, storage = null;
 let receipts = [];   // 클라우드에서 동기화된 내역 캐시
 let budgets = {};    // 월별 예산 캐시 { '2026-06': {분류:금액} }
 let unsubR = null, unsubB = null;
@@ -357,6 +395,7 @@ if(CONFIG_READY){
   firebase.initializeApp(firebaseConfig);
   auth = firebase.auth();
   db = firebase.firestore();
+  storage = firebase.storage();
   // 오프라인 캐시(네트워크가 끊겨도 보기/입력 가능, 복구 시 동기화)
   db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
@@ -366,12 +405,23 @@ if(CONFIG_READY){
   });
 } else {
   // 설정 미완료: 설정 안내 노출
-  $('#authGate').style.display='flex';
-  $('#authForm').style.display='none';
-  $('#setupNotice').style.display='block';
+  showGatePanel('setup');
 }
 
+function showGatePanel(which){ // 'form' | 'verify' | 'setup'
+  $('#authGate').style.display='flex';
+  $('#authForm').style.display = which==='form' ? 'block':'none';
+  $('#verifyNotice').style.display = which==='verify' ? 'block':'none';
+  $('#setupNotice').style.display = which==='setup' ? 'block':'none';
+  $('#app').style.display='none';
+}
 function onLogin(user){
+  // 이메일 미인증 시 진입 차단(동료 이메일 선점 방지)
+  if(!user.emailVerified){
+    $('#verifyEmail').textContent = user.email;
+    showGatePanel('verify');
+    return;
+  }
   uid = user.uid;
   $('#authGate').style.display='none';
   $('#app').style.display='block';
@@ -382,27 +432,28 @@ function onLogout(){
   uid = null; receipts = []; budgets = {};
   if(unsubR){unsubR(); unsubR=null;}
   if(unsubB){unsubB(); unsubB=null;}
-  $('#app').style.display='none';
-  $('#authGate').style.display='flex';
-  $('#authForm').style.display='block';
-  $('#setupNotice').style.display='none';
+  showGatePanel('form');
 }
+
+function showSyncError(msg){ const b=$('#syncBanner'); b.textContent='⚠ '+msg; b.classList.add('show'); }
+function clearSyncError(){ $('#syncBanner').classList.remove('show'); }
 
 /* ---------------- 실시간 동기화 구독 ---------------- */
 function subscribe(){
   const base = db.collection('users').doc(uid);
   unsubR = base.collection('receipts').orderBy('seq','desc')
     .onSnapshot(snap=>{
+      clearSyncError();
       receipts = snap.docs.map(d=>({ id:d.id, ...d.data() }));
       if(currentView==='list') renderList();
       if(currentView==='budget') updateBudgetStats($('#budgetMonth').value);
-    }, err=>console.error(err));
+    }, err=>{ console.error(err); showSyncError('내역 동기화에 실패했습니다. 인터넷 연결을 확인하세요. ('+err.code+')'); });
   unsubB = base.collection('budgets')
     .onSnapshot(snap=>{
       budgets = {};
       snap.docs.forEach(d=> budgets[d.id] = d.data());
       if(currentView==='budget') updateBudgetStats($('#budgetMonth').value);
-    }, err=>console.error(err));
+    }, err=>{ console.error(err); showSyncError('예산 동기화에 실패했습니다. ('+err.code+')'); });
 }
 
 /* ---------------- 로그인 / 회원가입 ---------------- */
@@ -443,8 +494,12 @@ $('#btnAuth').onclick = async ()=>{
   msg.className=''; msg.textContent='처리 중...';
   $('#btnAuth').disabled = true;
   try{
-    if(signupMode) await auth.createUserWithEmailAndPassword(email, pw);
-    else await auth.signInWithEmailAndPassword(email, pw);
+    if(signupMode){
+      const cred = await auth.createUserWithEmailAndPassword(email, pw);
+      await cred.user.sendEmailVerification();   // 가입 즉시 인증 메일 발송
+    } else {
+      await auth.signInWithEmailAndPassword(email, pw);
+    }
     msg.textContent='';
   }catch(e){
     msg.className='err'; msg.textContent = authError(e.code);
@@ -470,6 +525,22 @@ $('#resetLink').onclick = async ()=>{
   }
 };
 $('#btnLogout').onclick = ()=>{ if(confirm('로그아웃할까요?')) auth.signOut(); };
+
+/* ---------------- 이메일 인증 패널 ---------------- */
+$('#btnVerified').onclick = async ()=>{
+  const u = auth.currentUser; if(!u) return;
+  const vm = $('#verifyMsg'); vm.style.color='var(--muted)'; vm.textContent='확인 중...';
+  await u.reload();
+  if(auth.currentUser.emailVerified){ onLogin(auth.currentUser); }
+  else { vm.style.color='var(--danger)'; vm.textContent='아직 인증되지 않았습니다. 메일의 링크를 클릭한 뒤 다시 눌러주세요.'; }
+};
+$('#resendLink').onclick = async ()=>{
+  const u = auth.currentUser; if(!u) return;
+  const vm = $('#verifyMsg');
+  try{ await u.sendEmailVerification(); vm.style.color='var(--ok)'; vm.textContent='인증 메일을 다시 보냈습니다.'; }
+  catch(e){ vm.style.color='var(--danger)'; vm.textContent=authError(e.code); }
+};
+$('#verifyLogout').onclick = ()=> auth.signOut();
 
 /* ---------------- 화면 전환 ---------------- */
 document.querySelectorAll('.tabbar button').forEach(b=>{
@@ -635,33 +706,54 @@ function parseReceipt(text){
 /* ---------------- 저장 / 수정 (Firestore) ---------------- */
 $('#btnSave').onclick = async ()=>{
   if(!uid){ showStatus('error','로그인이 필요합니다.'); return; }
+  const store = $('#f-store').value.trim();
+  const amount = parseInt($('#f-amount').value||'0',10);
+  const date = $('#f-date').value || todayLocal();
+  const type = $('#f-type').value;
+  const company = type==='외부' ? $('#f-company').value.trim() : '';
+  const withWhom = $('#f-with').value.trim();
+
+  // --- 입력 검증 ---
+  if(!store){ showStatus('error','가맹점(상호)을 입력하세요.'); return; }
+  if(!amount || amount<=0){ showStatus('error','금액을 0원보다 크게 입력하세요.'); return; }
+  if(date > todayLocal() && !confirm('사용일자가 미래입니다. 그대로 저장할까요?')) return;
+  if(type==='외부' && (!company || !withWhom)){
+    showStatus('error','외부(업무활동)는 상대 회사명과 동석자를 입력해야 합니다.'); return;
+  }
+
   const fields = {
-    store: $('#f-store').value.trim() || '(미입력)',
-    date: $('#f-date').value || todayLocal(),
-    amount: parseInt($('#f-amount').value||'0',10),
+    store, date, amount,
     bizno: $('#f-bizno').value.trim(),
     category: $('#f-category').value,
-    type: $('#f-type').value,
-    company: $('#f-type').value === '외부' ? $('#f-company').value.trim() : '',
-    withWhom: $('#f-with').value.trim(),
-    memo: $('#f-memo').value.trim(),
-    image: currentImage || ''
+    type, company, withWhom,
+    memo: $('#f-memo').value.trim()
   };
   const col = db.collection('users').doc(uid).collection('receipts');
+  const docRef = editingId ? col.doc(editingId) : col.doc();
+  const seq = editingId ? ((receipts.find(r=>r.id===editingId)||{}).seq || Date.now()) : Date.now();
   $('#btnSave').disabled = true;
   try{
+    // 새로 촬영한 사진(data URL)만 Storage에 업로드하고 문서엔 URL만 저장
+    // → Firestore 문서 용량·1MB 한도·읽기 비용 문제 해결
+    let imageUrl = currentImage || '';
+    if(currentImage && currentImage.startsWith('data:')){
+      showStatus('loading','사진 업로드 중...');
+      const ref = storage.ref().child(`users/${uid}/receipts/${docRef.id}.jpg`);
+      await ref.putString(currentImage, 'data_url');
+      imageUrl = await ref.getDownloadURL();
+    }
+    fields.image = imageUrl;
     if(editingId){
-      await col.doc(editingId).update(fields);
+      await docRef.update(fields);
       showStatus('ok','수정되었습니다. ‘내역’ 탭에서 확인하세요.');
     }else{
-      // seq: 클라이언트 시각 정렬키(오프라인에서도 즉시 정렬·표시됨), createdAt: 서버 기록용
-      await col.add({ ...fields, seq: Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await docRef.set({ ...fields, seq, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
     }
     resetScan();
   }catch(e){
     console.error(e);
-    showStatus('error','저장 실패: '+(e.message||e.code));
+    showStatus('error','저장 실패: '+(e.message||e.code)+' (사진 저장에는 인터넷 연결이 필요합니다)');
   }finally{
     $('#btnSave').disabled = false;
   }
@@ -681,6 +773,25 @@ function resetScan(){
 function fmt(n){ return (n||0).toLocaleString('ko-KR'); }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+function getFilteredSorted(){
+  const q = ($('#listSearch').value||'').trim().toLowerCase();
+  const mon = $('#listMonth').value;
+  const sort = $('#listSort').value;
+  let arr = receipts.filter(r=>{
+    if(mon && !(r.date||'').startsWith(mon)) return false;
+    if(q){
+      const hay = [r.store,r.memo,r.withWhom,r.company,r.category].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  }).slice();
+  if(sort==='old') arr.sort((a,b)=>(a.seq||0)-(b.seq||0));
+  else if(sort==='amtdesc') arr.sort((a,b)=>(b.amount||0)-(a.amount||0));
+  else if(sort==='amtasc') arr.sort((a,b)=>(a.amount||0)-(b.amount||0));
+  // 'new'(기본)은 이미 seq 내림차순
+  return arr;
+}
+
 function renderList(){
   const list = $('#list');
   $('#sumCount').textContent = receipts.length;
@@ -690,7 +801,10 @@ function renderList(){
 
   if(!receipts.length){ list.innerHTML = '<div class="empty">저장된 영수증이 없습니다.<br>‘촬영’ 탭에서 영수증을 찍어보세요.</div>'; return; }
 
-  list.innerHTML = receipts.map(r=>`
+  const shown = getFilteredSorted();
+  if(!shown.length){ list.innerHTML = '<div class="empty">조건에 맞는 내역이 없습니다.</div>'; return; }
+
+  list.innerHTML = shown.map(r=>`
     <div class="item">
       <div class="item-head">
         ${r.image?`<img class="thumb" src="${r.image}" data-img="${r.id}" alt="">`:''}
@@ -711,16 +825,48 @@ function renderList(){
     </div>`).join('');
 
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit));
-  list.querySelectorAll('[data-del]').forEach(b=>b.onclick=async ()=>{
-    if(!confirm('이 영수증을 삭제할까요?')) return;
-    try{ await db.collection('users').doc(uid).collection('receipts').doc(b.dataset.del).delete(); }
-    catch(e){ alert('삭제 실패: '+(e.message||e.code)); }
-  });
+  list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteReceipt(b.dataset.del));
   list.querySelectorAll('[data-img]').forEach(img=>img.onclick=()=>{
     const rec = receipts.find(x=>x.id===img.dataset.img);
     if(rec?.image){ $('#modalImg').src=rec.image; $('#modalImage').classList.add('show'); }
   });
 }
+
+/* ---------------- 삭제 + 실행취소 ---------------- */
+let undoTimer = null, pendingImgDelete = null;
+async function deleteReceipt(id){
+  const rec = receipts.find(r=>r.id===id);
+  if(!rec) return;
+  try{
+    await db.collection('users').doc(uid).collection('receipts').doc(id).delete();
+  }catch(e){ alert('삭제 실패: '+(e.message||e.code)); return; }
+  showUndo(rec);
+}
+function finalizeImgDelete(){ if(pendingImgDelete){ pendingImgDelete(); pendingImgDelete=null; } }
+function showUndo(rec){
+  clearTimeout(undoTimer);
+  finalizeImgDelete(); // 직전 대기건 정리
+  const id = rec.id;
+  // 사진은 실행취소 대비 즉시 지우지 않고, 취소 시간 경과 후 정리
+  pendingImgDelete = ()=> storage.ref().child(`users/${uid}/receipts/${id}.jpg`).delete().catch(()=>{});
+  $('#toastMsg').textContent = '삭제했습니다.';
+  $('#toast').classList.add('show');
+  $('#toastUndo').onclick = async ()=>{
+    clearTimeout(undoTimer);
+    pendingImgDelete = null;          // 사진 유지(URL 그대로 복구)
+    const {id:_omit, ...data} = rec;
+    try{ await db.collection('users').doc(uid).collection('receipts').doc(rec.id).set(data); }
+    catch(e){ alert('복구 실패: '+(e.message||e.code)); }
+    $('#toast').classList.remove('show');
+  };
+  undoTimer = setTimeout(()=>{ $('#toast').classList.remove('show'); finalizeImgDelete(); }, 6000);
+}
+
+/* 목록 검색·필터·정렬 변경 시 재렌더 */
+['listSearch','listMonth','listSort'].forEach(id=>{
+  const ev = id==='listSearch' ? 'input' : 'change';
+  $('#'+id).addEventListener(ev, ()=>{ if(currentView==='list') renderList(); });
+});
 
 /* ---------------- 기존 항목 수정 ---------------- */
 function openEditor(id){
@@ -759,6 +905,17 @@ $('#btnExport').onclick = ()=>{
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `법인카드내역_${todayLocal()}.csv`;
+  a.click();
+};
+
+/* ---------------- 전체 백업(JSON, 사진 URL 포함) ---------------- */
+$('#btnBackup').onclick = ()=>{
+  if(!receipts.length){ alert('백업할 내역이 없습니다.'); return; }
+  const data = { exportedAt:new Date().toISOString(), email:(auth.currentUser&&auth.currentUser.email)||'', receipts, budgets };
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `법인카드백업_${todayLocal()}.json`;
   a.click();
 };
 
