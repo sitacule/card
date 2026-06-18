@@ -650,13 +650,27 @@ $('#fileInput').addEventListener('change', async (e)=>{
 
 /* ---------------- Tesseract.js OCR ---------------- */
 let ocrWorker = null;
+const OCR_STATUS = {
+  'loading tesseract core':'인식 엔진 로딩 중...',
+  'loading language traineddata':'한글 데이터 다운로드 중... (처음 한 번)',
+  'initializing tesseract':'엔진 초기화 중...',
+  'initializing api':'준비 마무리 중...',
+  'recognizing text':null  // 아래에서 진행률로 표시
+};
 async function getWorker(){
   if(ocrWorker) return ocrWorker;
+  // 최초 1회: 엔진+한글 데이터(약 10MB) 다운로드 안내
+  showStatus('loading','처음 한 번은 인식 엔진(약 10MB)을 내려받습니다. 잠시만 기다려 주세요...');
   ocrWorker = await Tesseract.createWorker(['kor','eng'], 1, {
-    logger: m => { if(m.status==='recognizing text') showStatus('loading', `영수증 인식 중... ${Math.round(m.progress*100)}%`); }
+    logger: m => {
+      if(m.status === 'recognizing text') showStatus('loading', `영수증 인식 중... ${Math.round(m.progress*100)}%`);
+      else if(OCR_STATUS[m.status]) showStatus('loading', OCR_STATUS[m.status]);
+    }
   });
   return ocrWorker;
 }
+// 페이지 종료 시 워커 정리(메모리 해제)
+window.addEventListener('beforeunload', ()=>{ if(ocrWorker) ocrWorker.terminate(); });
 async function runOCR(dataUrl){
   const worker = await getWorker();
   const { data:{ text } } = await worker.recognize(dataUrl);
@@ -675,19 +689,31 @@ function parseReceipt(text){
   let dm = text.match(/(20\d{2})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
   if(dm){ result.date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`; }
 
-  const amountKeywords = /(합\s*계|총\s*액|결제\s*금액|받을\s*금액|승인\s*금액|판매\s*금액|총\s*구매|합계금액|금\s*액)/;
+  // 금액 파싱:
+  //  - 합계/결제 계열(최종 결제금액) 라인을 최우선
+  //  - 공급가액/부가세 등 '구성요소' 라인은 총액 후보에서 제외
+  //  - 카드번호/사업자번호/전화/승인번호 같은 노이즈 라인 제외
+  const totalKw = /(받을\s*금액|결제\s*금액|합\s*계\s*금액|합계금액|합\s*계|총\s*액|총\s*구매액?|승인\s*금액|판매\s*금액)/;
+  const partKw  = /(공급\s*가액|부가\s*세|면세|과세|봉사료|할인|포인트|잔액)/;
+  const noiseKw = /(카드|승인\s*번호|가맹점\s*번호|사업자|tel|전화|일시|단말)/i;
+  const cardLike = /\d{3,4}[-\s\*]+\d{2,4}[-\s\*]+\d{2,4}/; // 카드/전화/사업자번호 패턴
   const numRe = /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,})/g;
-  let best = 0, keyworded = 0;
+
+  let totalAmt = 0, fallbackMax = 0;
   lines.forEach(line=>{
     const nums = line.match(numRe);
     if(!nums) return;
     const vals = nums.map(n=>parseInt(n.replace(/,/g,''),10)).filter(v=>v>=100 && v<100000000);
     if(!vals.length) return;
     const lineMax = Math.max(...vals);
-    if(amountKeywords.test(line)) keyworded = Math.max(keyworded, lineMax);
-    best = Math.max(best, lineMax);
+    const isPart = partKw.test(line);
+    const isNoise = noiseKw.test(line) || cardLike.test(line);
+    // 합계 계열 키워드 + 구성요소 아님 → 최우선 후보
+    if(totalKw.test(line) && !isPart) totalAmt = Math.max(totalAmt, lineMax);
+    // 폴백: 노이즈·구성요소가 아닌 라인의 최댓값
+    if(!isNoise && !isPart) fallbackMax = Math.max(fallbackMax, lineMax);
   });
-  result.amount = keyworded || best || 0;
+  result.amount = totalAmt || fallbackMax || 0;
 
   let storeLine = lines.find(l=>/(상\s*호|가\s*맹\s*점|점\s*명)/.test(l));
   if(storeLine){ result.store = storeLine.replace(/.*(상\s*호|가\s*맹\s*점|점\s*명)\s*[:：]?/,'').trim(); }
