@@ -415,13 +415,7 @@ function showGatePanel(which){ // 'form' | 'verify' | 'setup'
   $('#app').style.display='none';
 }
 async function onLogin(user){
-  // 이메일 미인증 시 진입 차단(동료 이메일 선점 방지)
-  if(!user.emailVerified){
-    $('#verifyEmail').textContent = user.email;
-    showGatePanel('verify');
-    return;
-  }
-  // 인증 직후 최신 클레임(email_verified)을 토큰에 반영 → 규칙 permission-denied 방지
+  // 최신 토큰 확보(클레임 반영)
   try{ await user.getIdToken(true); }catch(e){}
   uid = user.uid;
   $('#authGate').style.display='none';

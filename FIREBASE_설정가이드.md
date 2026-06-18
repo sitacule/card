@@ -26,7 +26,6 @@ service cloud.firestore {
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null
         && request.auth.uid == userId
-        && request.auth.token.email_verified == true
         && request.auth.token.email.matches('.*@lotte[.]net');
     }
   }
@@ -34,8 +33,9 @@ service cloud.firestore {
 ```
 
 > - `@lotte[.]net` : **회사 이메일만** 데이터 접근(서버 강제)
-> - `email_verified == true` : **이메일 인증을 마친 계정만** 접근 → 동료 이메일 선점 가입 방지
-> (앱 화면의 도메인 제한·인증 게이트는 편의용이고, 실제 차단은 이 규칙이 담당)
+> - (선택·강화) 이메일 인증까지 강제하려면 위 조건에 다음 줄 추가:
+>   `&& request.auth.token.email_verified == true`
+>   단, 인증 메일 수신·토큰 갱신 이슈로 초기엔 빼두는 것을 권장합니다(파일럿).
 
 > **영수증 사진 저장 방식**: 이 앱은 사진을 **Firestore 문서에 직접(base64) 저장**합니다.
 > 별도의 Storage 설정이 필요 없으며 **무료(Spark) 요금제 그대로 동작**합니다.
