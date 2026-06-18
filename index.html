@@ -97,6 +97,18 @@
   .view{display:none;} .view.active{display:block;}
   details summary{cursor:pointer; font-size:13px; color:var(--muted);}
   pre.raw{white-space:pre-wrap; font-size:12px; background:#f8fafc; padding:10px; border-radius:8px; max-height:200px; overflow:auto; color:#475569;}
+
+  .bud-item{border:1px solid var(--line); border-radius:12px; padding:12px 13px; margin-bottom:10px; background:#fff;}
+  .bud-item .cat{font-weight:700; font-size:14px; margin-bottom:8px;}
+  .bud-item .ln{display:flex; align-items:center; gap:8px; margin-bottom:9px;}
+  .bud-item .ln label{font-size:12px; color:var(--muted); width:34px;}
+  .bud-item .ln input{flex:1; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font-size:15px; text-align:right;}
+  .bud-bar{height:8px; background:#eef2f7; border-radius:5px; overflow:hidden;}
+  .bud-bar>i{display:block; height:100%; background:var(--primary); transition:width .25s;}
+  .bud-bar>i.over{background:var(--danger);}
+  .bud-stat{font-size:13px; margin-top:8px; display:flex; justify-content:space-between; align-items:center;}
+  .bud-stat b{font-weight:800;}
+  .rem-ok{color:var(--ok);} .rem-over{color:var(--danger);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -203,6 +215,21 @@
     </div>
     <div id="list"></div>
   </section>
+
+  <!-- ============ 예산 화면 ============ -->
+  <section id="view-budget" class="view">
+    <div class="card" style="padding:14px;">
+      <h2>예산 월 선택</h2>
+      <input type="month" id="budgetMonth" style="width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:10px; font-size:15px;">
+    </div>
+    <div class="card">
+      <h2>계정별 예산 / 사용 / 잔액</h2>
+      <div id="budgetTable"></div>
+      <p class="hint">예산 금액은 입력하는 즉시 해당 월에 자동 저장됩니다.</p>
+      <button class="btn btn-ghost btn-sm" id="btnCopyBudget" style="margin-top:6px;">↩ 지난달 예산 불러오기</button>
+    </div>
+    <div class="card" id="budgetTotal" style="text-align:center;"></div>
+  </section>
 </main>
 
 <!-- 탭바 -->
@@ -214,6 +241,10 @@
   <button data-view="list">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
     내역
+  </button>
+  <button data-view="budget">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg>
+    예산
   </button>
 </nav>
 
@@ -228,6 +259,8 @@
 <script>
 const $ = s => document.querySelector(s);
 const KEY_DATA = 'cc_receipts';
+const KEY_BUDGET = 'cc_budgets';
+const CATEGORIES = ['복리_식대(내부)','복리_업무활동(외부)','교통비','기타'];
 
 /* ---------------- 화면 전환 ---------------- */
 document.querySelectorAll('.tabbar button').forEach(b=>{
@@ -237,6 +270,7 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
     b.classList.add('active');
     $('#view-'+b.dataset.view).classList.add('active');
     if(b.dataset.view==='list') renderList();
+    if(b.dataset.view==='budget') renderBudget();
   });
 });
 
@@ -510,6 +544,96 @@ $('#btnClearAll').onclick = ()=>{
   if(confirm('모든 영수증 내역을 삭제할까요? 되돌릴 수 없습니다.')){
     saveData([]); renderList();
   }
+};
+
+/* ---------------- 월별 예산 ---------------- */
+function loadBudgets(){ try{return JSON.parse(localStorage.getItem(KEY_BUDGET))||{};}catch{return {};} }
+function saveBudgets(b){ localStorage.setItem(KEY_BUDGET, JSON.stringify(b)); }
+
+// 해당 월 + 분류의 사용 합계
+function usedByCategory(month, cat){
+  return loadData()
+    .filter(r => (r.date||'').startsWith(month) && r.category === cat)
+    .reduce((s,r)=>s+(r.amount||0), 0);
+}
+
+function renderBudget(){
+  const monthEl = $('#budgetMonth');
+  if(!monthEl.value) monthEl.value = new Date().toISOString().slice(0,7);
+  const month = monthEl.value;
+  const monthBudget = loadBudgets()[month] || {};
+
+  $('#budgetTable').innerHTML = CATEGORIES.map((cat,i)=>{
+    const bud = monthBudget[cat] || 0;
+    return `
+      <div class="bud-item" data-i="${i}">
+        <div class="cat">${esc(cat)}</div>
+        <div class="ln">
+          <label>예산</label>
+          <input type="number" inputmode="numeric" data-cat="${esc(cat)}" value="${bud||''}" placeholder="0">
+        </div>
+        <div class="bud-bar"><i></i></div>
+        <div class="bud-stat">
+          <span class="used"></span>
+          <span class="rem"></span>
+        </div>
+      </div>`;
+  }).join('');
+
+  // 예산 입력 → 즉시 저장 + 숫자만 갱신(입력란은 그대로 유지)
+  $('#budgetTable').querySelectorAll('input[data-cat]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const b = loadBudgets();
+      if(!b[month]) b[month] = {};
+      b[month][inp.dataset.cat] = parseInt(inp.value||'0',10);
+      saveBudgets(b);
+      updateBudgetStats(month);
+    });
+  });
+
+  updateBudgetStats(month);
+}
+
+// 막대·잔액·합계만 다시 계산 (입력란은 건드리지 않음)
+function updateBudgetStats(month){
+  const monthBudget = loadBudgets()[month] || {};
+  let totBudget=0, totUsed=0;
+  $('#budgetTable').querySelectorAll('.bud-item').forEach((item,i)=>{
+    const cat = CATEGORIES[i];
+    const bud = monthBudget[cat] || 0;
+    const used = usedByCategory(month, cat);
+    const rem = bud - used;
+    totBudget += bud; totUsed += used;
+    const pct = bud>0 ? Math.min(100, Math.round(used/bud*100)) : 0;
+    const over = bud>0 && used>bud;
+    const bar = item.querySelector('.bud-bar>i');
+    bar.style.width = pct+'%';
+    bar.className = over ? 'over' : '';
+    item.querySelector('.used').textContent = `사용 ${fmt(used)}원${bud>0?` (${pct}%)`:''}`;
+    item.querySelector('.rem').innerHTML = `잔액 <b class="${rem<0?'rem-over':'rem-ok'}">${fmt(rem)}원</b>`;
+  });
+
+  const totRem = totBudget - totUsed;
+  $('#budgetTotal').innerHTML = (totBudget||totUsed)
+    ? `<div style="font-size:13px; color:var(--muted); margin-bottom:6px;">${month} 합계</div>
+       <div style="font-size:15px;">예산 <b>${fmt(totBudget)}</b> · 사용 <b>${fmt(totUsed)}</b> · 잔액 <b class="${totRem<0?'rem-over':'rem-ok'}">${fmt(totRem)}원</b></div>`
+    : `<div class="empty" style="padding:10px;">위에서 계정별 예산을 입력하세요.</div>`;
+}
+
+$('#budgetMonth').addEventListener('change', renderBudget);
+
+$('#btnCopyBudget').onclick = ()=>{
+  const month = $('#budgetMonth').value;
+  const [y,m] = month.split('-').map(Number);
+  const prev = new Date(y, m-2, 1); // 지난달
+  const prevKey = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  const budgets = loadBudgets();
+  if(!budgets[prevKey] || !Object.keys(budgets[prevKey]).length){
+    alert(`${prevKey} 예산이 없어 불러올 수 없습니다.`); return;
+  }
+  budgets[month] = {...budgets[prevKey]};
+  saveBudgets(budgets);
+  renderBudget();
 };
 
 /* 모달 바깥 클릭 닫기 */
