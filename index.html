@@ -239,23 +239,17 @@
         </div>
         <div class="field">
           <label>금액 (원)</label>
-          <input type="number" id="f-amount" inputmode="numeric" placeholder="0">
+          <input type="text" id="f-amount" inputmode="numeric" placeholder="0">
         </div>
       </div>
-      <div class="row">
-        <div class="field">
-          <label>사업자번호</label>
-          <input type="text" id="f-bizno" placeholder="000-00-00000">
-        </div>
-        <div class="field">
-          <label>분류</label>
-          <select id="f-category">
-            <option>복리_식대(내부)</option>
-            <option>복리_업무활동(외부)</option>
-            <option>교통비</option>
-            <option>기타</option>
-          </select>
-        </div>
+      <div class="field">
+        <label>분류</label>
+        <select id="f-category">
+          <option>복리_식대(내부)</option>
+          <option>복리_업무활동(외부)</option>
+          <option>교통비</option>
+          <option>기타</option>
+        </select>
       </div>
       <div class="row">
         <div class="field">
@@ -388,6 +382,11 @@ function todayLocal(){
 function thisMonthLocal(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+// 상호명으로 분류 자동 추정 (택시 등 교통 관련 → 교통비)
+function guessCategory(store){
+  if(/택시|버스|지하철|주유|충전소|고속도로|통행료|철도|KTX|코레일|모빌리티|렌터카|주차/.test(store||'')) return '교통비';
+  return '';
 }
 
 let db = null, auth = null, uid = null;
@@ -567,7 +566,7 @@ $('#btnManual').onclick = ()=>{
   hideStatus();
   $('#f-store').value='';
   $('#f-date').value = todayLocal();
-  $('#f-amount').value=''; $('#f-bizno').value='';
+  $('#f-amount').value='';
   $('#f-category').value='복리_식대(내부)'; $('#f-type').value='내부';
   $('#f-company').value=''; $('#f-with').value=''; $('#f-memo').value='';
   $('#rawText').textContent='(직접 입력 - 인식된 원문 없음)';
@@ -587,6 +586,11 @@ $('#f-category').addEventListener('change', ()=>{
   if(c.includes('외부')) $('#f-type').value = '외부';
   else if(c.includes('내부')) $('#f-type').value = '내부';
   syncTypeUI();
+});
+// 금액 입력 시 천단위 콤마 자동 표시 (저장 시 콤마 제거)
+$('#f-amount').addEventListener('input', e=>{
+  const digits = e.target.value.replace(/[^0-9]/g,'');
+  e.target.value = digits ? parseInt(digits,10).toLocaleString('ko-KR') : '';
 });
 
 /* ---------------- 이미지 모달 ---------------- */
@@ -638,9 +642,8 @@ $('#fileInput').addEventListener('change', async (e)=>{
     $('#rawText').textContent = (data && data.text) || '(인식된 텍스트 없음)';
     $('#f-store').value  = parsed.store;
     $('#f-date').value   = parsed.date;
-    $('#f-amount').value = parsed.amount || '';
-    $('#f-bizno').value  = parsed.bizno;
-    $('#f-category').value = '복리_식대(내부)';
+    $('#f-amount').value = parsed.amount ? parsed.amount.toLocaleString('ko-KR') : '';
+    $('#f-category').value = guessCategory(parsed.store) || '복리_식대(내부)';
     $('#f-type').value   = '내부';
     $('#f-company').value = '';
     $('#f-with').value   = '';
@@ -767,12 +770,9 @@ function amountFromGeometry(data){
 
 function parseReceipt(data){
   const text = (typeof data === 'string') ? data : ((data && data.text) || '');
-  const result = { store:'', date:'', amount:0, bizno:'' };
+  const result = { store:'', date:'', amount:0 };
   if(!text) return result;
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
-
-  const bizMatch = text.match(/\b\d{3}-\d{2}-\d{5}\b/);
-  if(bizMatch) result.bizno = bizMatch[0];
 
   let dm = text.match(/(20\d{2})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
   if(dm){ result.date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`; }
@@ -890,9 +890,8 @@ $('#btnParsePaste').onclick = ()=>{
   $('#rawText').textContent = t;
   $('#f-store').value  = parsed.store;
   $('#f-date').value   = parsed.date || todayLocal();
-  $('#f-amount').value = parsed.amount || '';
-  $('#f-bizno').value  = '';
-  $('#f-category').value = '복리_식대(내부)';
+  $('#f-amount').value = parsed.amount ? parsed.amount.toLocaleString('ko-KR') : '';
+  $('#f-category').value = guessCategory(parsed.store) || '복리_식대(내부)';
   $('#f-type').value   = '내부';
   $('#f-company').value = ''; $('#f-with').value = '';
   $('#f-memo').value   = parsed.memo || '';
@@ -906,7 +905,7 @@ $('#btnParsePaste').onclick = ()=>{
 $('#btnSave').onclick = async ()=>{
   if(!uid){ showStatus('error','로그인이 필요합니다.'); return; }
   const store = $('#f-store').value.trim();
-  const amount = parseInt($('#f-amount').value||'0',10);
+  const amount = parseInt(($('#f-amount').value||'').replace(/[^0-9]/g,''),10) || 0;  // 콤마 제거
   const date = $('#f-date').value || todayLocal();
   const type = $('#f-type').value;
   const company = type==='외부' ? $('#f-company').value.trim() : '';
@@ -922,7 +921,6 @@ $('#btnSave').onclick = async ()=>{
 
   const fields = {
     store, date, amount,
-    bizno: $('#f-bizno').value.trim(),
     category: $('#f-category').value,
     type, company, withWhom,
     memo: $('#f-memo').value.trim()
@@ -1061,8 +1059,7 @@ function openEditor(id){
   $('#preview').innerHTML = rec.image ? `<img src="${rec.image}" alt="미리보기">` : '';
   $('#f-store').value = rec.store || '';
   $('#f-date').value  = rec.date || '';
-  $('#f-amount').value = rec.amount || '';
-  $('#f-bizno').value = rec.bizno || '';
+  $('#f-amount').value = rec.amount ? rec.amount.toLocaleString('ko-KR') : '';
   $('#f-category').value = CATEGORIES.includes(rec.category) ? rec.category : '기타';
   $('#f-type').value  = rec.type || '내부';
   $('#f-company').value = rec.company || '';
@@ -1079,8 +1076,8 @@ function openEditor(id){
 /* ---------------- CSV 내보내기 ---------------- */
 $('#btnExport').onclick = ()=>{
   if(!receipts.length){ alert('내보낼 내역이 없습니다.'); return; }
-  const header = ['사용일자','가맹점','금액','분류','구분','회사명','동석자','사업자번호','메모'];
-  const rows = receipts.map(r=>[r.date,r.store,r.amount,r.category,r.type,r.company,r.withWhom,r.bizno,r.memo]
+  const header = ['사용일자','가맹점','금액','분류','구분','회사명','동석자','메모'];
+  const rows = receipts.map(r=>[r.date,r.store,r.amount,r.category,r.type,r.company,r.withWhom,r.memo]
     .map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
   const csv = '﻿'+header.join(',')+'\n'+rows.join('\n');
   const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
