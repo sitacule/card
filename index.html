@@ -622,12 +622,12 @@ $('#fileInput').addEventListener('change', async (e)=>{
     $('#resultCard').style.display='none';
     showStatus('loading','인식 엔진을 준비하는 중입니다...');
 
-    const text = await runOCR(dataUrl);
-    const parsed = parseReceipt(text);
+    const data = await runOCR(dataUrl);
+    const parsed = parseReceipt(data);
 
     editingId = null;
     $('#btnSave').textContent = '저장하기';
-    $('#rawText').textContent = text || '(인식된 텍스트 없음)';
+    $('#rawText').textContent = (data && data.text) || '(인식된 텍스트 없음)';
     $('#f-store').value  = parsed.store;
     $('#f-date').value   = parsed.date;
     $('#f-amount').value = parsed.amount || '';
@@ -667,18 +667,98 @@ async function getWorker(){
       else if(OCR_STATUS[m.status]) showStatus('loading', OCR_STATUS[m.status]);
     }
   });
+  // 영수증(단일 블록) 가정, 단어 간 공백 보존 → 인식 안정화
+  try{ await ocrWorker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' }); }catch(e){}
   return ocrWorker;
 }
 // 페이지 종료 시 워커 정리(메모리 해제)
 window.addEventListener('beforeunload', ()=>{ if(ocrWorker) ocrWorker.terminate(); });
+
 async function runOCR(dataUrl){
   const worker = await getWorker();
-  const { data:{ text } } = await worker.recognize(dataUrl);
-  return text;
+  const pre = await preprocessForOCR(dataUrl);          // 전처리 이미지로 인식
+  const { data } = await worker.recognize(pre, {}, { blocks: true }); // 좌표(blocks) 포함
+  return data;
 }
 
-/* ---------------- 영수증 텍스트 파싱 ---------------- */
-function parseReceipt(text){
+/* ---------------- OCR 전처리: 확대 + 그레이스케일 + Otsu 이진화 ---------------- */
+function preprocessForOCR(dataUrl){
+  return new Promise((resolve)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      try{
+        let w = img.width, h = img.height;
+        const minW = 1500;                       // 작으면 확대(글자 또렷)
+        if(w < minW){ const s = minW/w; w = Math.round(w*s); h = Math.round(h*s); }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const id = ctx.getImageData(0,0,w,h), d = id.data;
+        // 그레이스케일 + 히스토그램
+        const total = w*h, hist = new Array(256).fill(0), gray = new Uint8ClampedArray(total);
+        for(let i=0,p=0;i<d.length;i+=4,p++){
+          const g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114)|0;
+          gray[p]=g; hist[g]++;
+        }
+        // Otsu 임계값 계산
+        let sum=0; for(let t=0;t<256;t++) sum+=t*hist[t];
+        let sumB=0, wB=0, maxVar=0, thr=128;
+        for(let t=0;t<256;t++){
+          wB+=hist[t]; if(!wB) continue;
+          const wF=total-wB; if(!wF) break;
+          sumB+=t*hist[t];
+          const mB=sumB/wB, mF=(sum-sumB)/wF, between=wB*wF*(mB-mF)*(mB-mF);
+          if(between>maxVar){ maxVar=between; thr=t; }
+        }
+        // 이진화
+        for(let i=0,p=0;i<d.length;i+=4,p++){
+          const v = gray[p] > thr ? 255 : 0;
+          d[i]=d[i+1]=d[i+2]=v;
+        }
+        ctx.putImageData(id,0,0);
+        resolve(c.toDataURL('image/png'));
+      }catch(e){ resolve(dataUrl); }   // 실패 시 원본으로
+    };
+    img.onerror = ()=> resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/* ---------------- 영수증 파싱 (좌표 우선 + 텍스트 폴백) ---------------- */
+// Tesseract data → 라인 배열(텍스트 + 단어 좌표)
+function ocrLines(data){
+  if(!data || typeof data === 'string') return [];
+  let lines = data.lines;
+  if(!lines || !lines.length){
+    lines = [];
+    (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>lines.push(l))));
+  }
+  return lines || [];
+}
+// 합계 계열 라인에서 '가장 오른쪽 숫자'를 금액으로 (라벨-값 같은 줄 매칭)
+function amountFromGeometry(data){
+  const lines = ocrLines(data);
+  if(!lines.length) return 0;
+  const totalKw = /(받을\s*금액|결제\s*금액|합\s*계|총\s*액|승인\s*금액|판매\s*금액)/;
+  const partKw  = /(공급\s*가액|부가\s*세|면세|과세|봉사료|할인|포인트|잔액)/;
+  let best = 0;
+  lines.forEach(l=>{
+    const t = l.text || '';
+    if(!totalKw.test(t) || partKw.test(t)) return;
+    let rightVal = 0, rightX = -1;
+    (l.words||[]).forEach(w=>{
+      const v = parseInt((w.text||'').replace(/[^0-9]/g,''),10);
+      const x = (w.bbox && w.bbox.x1) || 0;
+      if(v>=100 && v<100000000 && x>=rightX){ rightX = x; rightVal = v; }
+    });
+    if(rightVal) best = Math.max(best, rightVal);
+  });
+  return best;
+}
+
+function parseReceipt(data){
+  const text = (typeof data === 'string') ? data : ((data && data.text) || '');
   const result = { store:'', date:'', amount:0, bizno:'' };
   if(!text) return result;
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -713,7 +793,8 @@ function parseReceipt(text){
     // 폴백: 노이즈·구성요소가 아닌 라인의 최댓값
     if(!isNoise && !isPart) fallbackMax = Math.max(fallbackMax, lineMax);
   });
-  result.amount = totalAmt || fallbackMax || 0;
+  // 좌표 기반(라벨-값 같은 줄) 우선 → 없으면 텍스트 기반
+  result.amount = amountFromGeometry(data) || totalAmt || fallbackMax || 0;
 
   let storeLine = lines.find(l=>/(상\s*호|가\s*맹\s*점|점\s*명)/.test(l));
   if(storeLine){ result.store = storeLine.replace(/.*(상\s*호|가\s*맹\s*점|점\s*명)\s*[:：]?/,'').trim(); }
