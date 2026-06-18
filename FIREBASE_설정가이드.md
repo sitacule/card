@@ -37,25 +37,10 @@ service cloud.firestore {
 > - `email_verified == true` : **이메일 인증을 마친 계정만** 접근 → 동료 이메일 선점 가입 방지
 > (앱 화면의 도메인 제한·인증 게이트는 편의용이고, 실제 차단은 이 규칙이 담당)
 
-## 4-1. Storage 만들기 (영수증 사진 저장)
-영수증 사진은 Firestore가 아니라 **Storage**에 저장합니다(용량·비용 효율).
-1. 좌측 **빌드 → Storage → 시작하기** → 위치 서울 권장
-2. **규칙(Rules)** 탭에 아래를 붙여넣고 **게시**:
-
-```
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /users/{userId}/{allPaths=**} {
-      allow read, write: if request.auth != null
-        && request.auth.uid == userId
-        && request.auth.token.email_verified == true
-        && request.auth.token.email.matches('.*@lotte[.]net')
-        && request.resource.size < 2 * 1024 * 1024;   // 사진 2MB 제한
-    }
-  }
-}
-```
+> **영수증 사진 저장 방식**: 이 앱은 사진을 **Firestore 문서에 직접(base64) 저장**합니다.
+> 별도의 Storage 설정이 필요 없으며 **무료(Spark) 요금제 그대로 동작**합니다.
+> (사진은 1200px/품질 0.6으로 압축되어 문서 1MB 한도 안에 들어갑니다.)
+> 전사 규모로 사진 용량이 커지면, 추후 **Blaze 업그레이드 + Storage 이전**을 검토하세요.
 
 ## 5. 웹 앱 등록 & 설정값 복사
 1. 좌측 상단 ⚙ **프로젝트 설정 → 일반** 탭

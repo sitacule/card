@@ -143,7 +143,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <!-- Tesseract.js OCR (무료, 브라우저 내장) -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -382,7 +381,7 @@ function thisMonthLocal(){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
-let db = null, auth = null, uid = null, storage = null;
+let db = null, auth = null, uid = null;
 let receipts = [];   // 클라우드에서 동기화된 내역 캐시
 let budgets = {};    // 월별 예산 캐시 { '2026-06': {분류:금액} }
 let unsubR = null, unsubB = null;
@@ -395,7 +394,6 @@ if(CONFIG_READY){
   firebase.initializeApp(firebaseConfig);
   auth = firebase.auth();
   db = firebase.firestore();
-  storage = firebase.storage();
   // 오프라인 캐시(네트워크가 끊겨도 보기/입력 가능, 복구 시 동기화)
   db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
@@ -729,31 +727,20 @@ $('#btnSave').onclick = async ()=>{
     memo: $('#f-memo').value.trim()
   };
   const col = db.collection('users').doc(uid).collection('receipts');
-  const docRef = editingId ? col.doc(editingId) : col.doc();
-  const seq = editingId ? ((receipts.find(r=>r.id===editingId)||{}).seq || Date.now()) : Date.now();
+  fields.image = currentImage || '';   // 사진은 Firestore 문서에 직접(base64) 저장 — 무료 요금제 호환
   $('#btnSave').disabled = true;
   try{
-    // 새로 촬영한 사진(data URL)만 Storage에 업로드하고 문서엔 URL만 저장
-    // → Firestore 문서 용량·1MB 한도·읽기 비용 문제 해결
-    let imageUrl = currentImage || '';
-    if(currentImage && currentImage.startsWith('data:')){
-      showStatus('loading','사진 업로드 중...');
-      const ref = storage.ref().child(`users/${uid}/receipts/${docRef.id}.jpg`);
-      await ref.putString(currentImage, 'data_url');
-      imageUrl = await ref.getDownloadURL();
-    }
-    fields.image = imageUrl;
     if(editingId){
-      await docRef.update(fields);
+      await col.doc(editingId).update(fields);
       showStatus('ok','수정되었습니다. ‘내역’ 탭에서 확인하세요.');
     }else{
-      await docRef.set({ ...fields, seq, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await col.add({ ...fields, seq: Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
     }
     resetScan();
   }catch(e){
     console.error(e);
-    showStatus('error','저장 실패: '+(e.message||e.code)+' (사진 저장에는 인터넷 연결이 필요합니다)');
+    showStatus('error','저장 실패: '+(e.message||e.code));
   }finally{
     $('#btnSave').disabled = false;
   }
@@ -833,33 +820,26 @@ function renderList(){
 }
 
 /* ---------------- 삭제 + 실행취소 ---------------- */
-let undoTimer = null, pendingImgDelete = null;
+let undoTimer = null;
 async function deleteReceipt(id){
   const rec = receipts.find(r=>r.id===id);
   if(!rec) return;
-  try{
-    await db.collection('users').doc(uid).collection('receipts').doc(id).delete();
-  }catch(e){ alert('삭제 실패: '+(e.message||e.code)); return; }
+  try{ await db.collection('users').doc(uid).collection('receipts').doc(id).delete(); }
+  catch(e){ alert('삭제 실패: '+(e.message||e.code)); return; }
   showUndo(rec);
 }
-function finalizeImgDelete(){ if(pendingImgDelete){ pendingImgDelete(); pendingImgDelete=null; } }
 function showUndo(rec){
   clearTimeout(undoTimer);
-  finalizeImgDelete(); // 직전 대기건 정리
-  const id = rec.id;
-  // 사진은 실행취소 대비 즉시 지우지 않고, 취소 시간 경과 후 정리
-  pendingImgDelete = ()=> storage.ref().child(`users/${uid}/receipts/${id}.jpg`).delete().catch(()=>{});
   $('#toastMsg').textContent = '삭제했습니다.';
   $('#toast').classList.add('show');
   $('#toastUndo').onclick = async ()=>{
     clearTimeout(undoTimer);
-    pendingImgDelete = null;          // 사진 유지(URL 그대로 복구)
-    const {id:_omit, ...data} = rec;
+    const {id:_omit, ...data} = rec;   // 사진(base64)까지 그대로 복구
     try{ await db.collection('users').doc(uid).collection('receipts').doc(rec.id).set(data); }
     catch(e){ alert('복구 실패: '+(e.message||e.code)); }
     $('#toast').classList.remove('show');
   };
-  undoTimer = setTimeout(()=>{ $('#toast').classList.remove('show'); finalizeImgDelete(); }, 6000);
+  undoTimer = setTimeout(()=>{ $('#toast').classList.remove('show'); }, 6000);
 }
 
 /* 목록 검색·필터·정렬 변경 시 재렌더 */
