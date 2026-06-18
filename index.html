@@ -139,10 +139,10 @@
   <div class="box">
     <div id="authForm">
       <h2>법인카드 영수증</h2>
-      <p class="sub" id="authSub">회사 이메일로 로그인하세요</p>
+      <p class="sub" id="authSub">회사 이메일(@lotte.net)로 로그인하세요</p>
       <div class="field">
         <label>이메일</label>
-        <input type="email" id="authEmail" autocomplete="username" placeholder="name@company.com">
+        <input type="email" id="authEmail" autocomplete="username" placeholder="name@lotte.net">
       </div>
       <div class="field">
         <label>비밀번호</label>
@@ -153,6 +153,7 @@
       <div class="toggle-auth" id="toggleAuth">
         계정이 없으신가요? <a id="toggleLink">회원가입</a>
       </div>
+      <div class="toggle-auth"><a id="resetLink">비밀번호를 잊으셨나요?</a></div>
     </div>
     <div id="setupNotice" style="display:none;">
       <h2>설정 필요</h2>
@@ -330,6 +331,8 @@ const CONFIG_READY = !firebaseConfig.apiKey.startsWith("PASTE");
 
 const $ = s => document.querySelector(s);
 const CATEGORIES = ['복리_식대(내부)','복리_업무활동(외부)','교통비','기타'];
+const ALLOWED_DOMAIN = 'lotte.net';   // 이 도메인 이메일만 가입/로그인 허용
+function domainOK(email){ return email.toLowerCase().endsWith('@'+ALLOWED_DOMAIN); }
 
 let db = null, auth = null, uid = null;
 let receipts = [];   // 클라우드에서 동기화된 내역 캐시
@@ -415,6 +418,7 @@ function authError(code){
     'auth/invalid-credential':'이메일 또는 비밀번호가 올바르지 않습니다.',
     'auth/user-not-found':'가입되지 않은 이메일입니다.',
     'auth/wrong-password':'비밀번호가 올바르지 않습니다.',
+    'auth/missing-email':'이메일을 입력하세요.',
     'auth/too-many-requests':'시도가 많습니다. 잠시 후 다시 시도하세요.'
   };
   return map[code] || ('오류: '+code);
@@ -423,6 +427,9 @@ $('#btnAuth').onclick = async ()=>{
   const email = $('#authEmail').value.trim();
   const pw = $('#authPw').value;
   const msg = $('#authMsg');
+  if(!domainOK(email)){
+    msg.className='err'; msg.textContent = `회사 이메일(@${ALLOWED_DOMAIN})만 사용할 수 있습니다.`; return;
+  }
   msg.className=''; msg.textContent='처리 중...';
   $('#btnAuth').disabled = true;
   try{
@@ -436,6 +443,22 @@ $('#btnAuth').onclick = async ()=>{
   }
 };
 $('#authPw').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btnAuth').click(); });
+
+// 비밀번호 찾기(재설정 메일)
+$('#resetLink').onclick = async ()=>{
+  const email = $('#authEmail').value.trim();
+  const msg = $('#authMsg');
+  if(!domainOK(email)){
+    msg.className='err'; msg.textContent = `재설정 메일을 받을 회사 이메일(@${ALLOWED_DOMAIN})을 입력하세요.`; return;
+  }
+  msg.className=''; msg.textContent='메일 전송 중...';
+  try{
+    await auth.sendPasswordResetEmail(email);
+    msg.className='ok'; msg.textContent='비밀번호 재설정 메일을 보냈습니다. 메일함을 확인하세요.';
+  }catch(e){
+    msg.className='err'; msg.textContent = authError(e.code);
+  }
+};
 $('#btnLogout').onclick = ()=>{ if(confirm('로그아웃할까요?')) auth.signOut(); };
 
 /* ---------------- 화면 전환 ---------------- */

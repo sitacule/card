@@ -24,11 +24,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.email.matches('.*@lotte[.]net');
     }
   }
 }
 ```
+
+> 위 규칙의 `@lotte[.]net` 조건이 **회사 이메일만 데이터 접근**을 서버에서 강제합니다.
+> (앱 화면의 도메인 제한은 편의용이고, 실제 차단은 이 규칙이 담당)
 
 ## 5. 웹 앱 등록 & 설정값 복사
 1. 좌측 상단 ⚙ **프로젝트 설정 → 일반** 탭
