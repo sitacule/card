@@ -98,6 +98,7 @@
   details summary{cursor:pointer; font-size:13px; color:var(--muted);}
   pre.raw{white-space:pre-wrap; font-size:12px; background:#f8fafc; padding:10px; border-radius:8px; max-height:200px; overflow:auto; color:#475569;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
 <header>
@@ -105,7 +106,7 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
     법인카드 영수증
   </h1>
-  <button id="btnSettings">⚙ 설정</button>
+  <span style="font-size:11px; opacity:.85;">무료 OCR · 설치 불필요</span>
 </header>
 
 <main>
@@ -197,25 +198,6 @@
   </button>
 </nav>
 
-<!-- 설정 모달 -->
-<div class="modal" id="modalSettings">
-  <div class="panel">
-    <h3>⚙ 설정</h3>
-    <div class="field">
-      <label>Google Cloud Vision API 키</label>
-      <input type="password" id="apiKeyInput" placeholder="AIza...">
-      <p class="hint">
-        키는 이 브라우저에만 저장되며 외부로 전송되지 않습니다(인식 요청 시 Google에만 사용).
-        발급: Google Cloud Console → API 및 서비스 → Cloud Vision API 사용 설정 후 API 키 생성.
-      </p>
-    </div>
-    <div class="btn-group" style="margin-top:8px;">
-      <button class="btn btn-ghost" id="btnCloseSettings">닫기</button>
-      <button class="btn btn-primary" id="btnSaveKey">키 저장</button>
-    </div>
-  </div>
-</div>
-
 <!-- 이미지 확대 모달 -->
 <div class="modal" id="modalImage">
   <div class="panel" style="text-align:center;">
@@ -226,7 +208,6 @@
 
 <script>
 const $ = s => document.querySelector(s);
-const KEY_API = 'cc_vision_api_key';
 const KEY_DATA = 'cc_receipts';
 
 /* ---------------- 화면 전환 ---------------- */
@@ -239,19 +220,6 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
     if(b.dataset.view==='list') renderList();
   });
 });
-
-/* ---------------- 설정 모달 ---------------- */
-$('#btnSettings').onclick = ()=>{
-  $('#apiKeyInput').value = localStorage.getItem(KEY_API) || '';
-  $('#modalSettings').classList.add('show');
-};
-$('#btnCloseSettings').onclick = ()=> $('#modalSettings').classList.remove('show');
-$('#btnSaveKey').onclick = ()=>{
-  const v = $('#apiKeyInput').value.trim();
-  if(v) localStorage.setItem(KEY_API, v); else localStorage.removeItem(KEY_API);
-  $('#modalSettings').classList.remove('show');
-  showStatus('ok','API 키가 저장되었습니다.');
-};
 
 /* ---------------- 이미지 모달 ---------------- */
 $('#btnCloseImage').onclick = ()=> $('#modalImage').classList.remove('show');
@@ -294,22 +262,15 @@ let currentImage = null; // 현재 인식 중인 이미지 dataURL
 $('#fileInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
-  const apiKey = localStorage.getItem(KEY_API);
-  if(!apiKey){
-    showStatus('error','먼저 우측 상단 ⚙ 설정에서 Google Vision API 키를 등록해 주세요.');
-    $('#modalSettings').classList.add('show');
-    e.target.value=''; return;
-  }
 
   try{
     const dataUrl = await fileToCompressedBase64(file);
     currentImage = dataUrl;
     $('#preview').innerHTML = `<img src="${dataUrl}" alt="미리보기">`;
     $('#resultCard').style.display='none';
-    showStatus('loading','영수증을 인식하는 중입니다... (몇 초 소요)');
+    showStatus('loading','인식 엔진을 준비하는 중입니다...');
 
-    const base64 = dataUrl.split(',')[1];
-    const text = await callVisionOCR(apiKey, base64);
+    const text = await runOCR(dataUrl);
     const parsed = parseReceipt(text);
 
     $('#rawText').textContent = text || '(인식된 텍스트 없음)';
@@ -319,7 +280,7 @@ $('#fileInput').addEventListener('change', async (e)=>{
     $('#f-bizno').value  = parsed.bizno;
     $('#f-memo').value   = '';
     $('#resultCard').style.display='block';
-    showStatus('ok','인식 완료! 내용을 확인하고 저장하세요.');
+    showStatus('ok','인식 완료! 내용을 확인하고 저장하세요. (틀린 부분은 직접 수정하세요)');
   }catch(err){
     console.error(err);
     showStatus('error','인식 실패: '+err.message);
@@ -328,25 +289,23 @@ $('#fileInput').addEventListener('change', async (e)=>{
   }
 });
 
-/* ---------------- Google Vision API 호출 ---------------- */
-async function callVisionOCR(apiKey, base64){
-  const url = 'https://vision.googleapis.com/v1/images:annotate?key='+encodeURIComponent(apiKey);
-  const body = {
-    requests:[{
-      image:{ content: base64 },
-      features:[{ type:'DOCUMENT_TEXT_DETECTION' }],
-      imageContext:{ languageHints:['ko','en'] }
-    }]
-  };
-  const res = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const json = await res.json();
-  if(!res.ok){
-    const m = json.error?.message || ('HTTP '+res.status);
-    throw new Error(m);
-  }
-  const r = json.responses?.[0];
-  if(r?.error) throw new Error(r.error.message);
-  return r?.fullTextAnnotation?.text || '';
+/* ---------------- Tesseract.js OCR (무료, 브라우저 내장) ---------------- */
+let ocrWorker = null;
+async function getWorker(){
+  if(ocrWorker) return ocrWorker;
+  ocrWorker = await Tesseract.createWorker(['kor','eng'], 1, {
+    logger: m => {
+      if(m.status === 'recognizing text'){
+        showStatus('loading', `영수증 인식 중... ${Math.round(m.progress*100)}%`);
+      }
+    }
+  });
+  return ocrWorker;
+}
+async function runOCR(dataUrl){
+  const worker = await getWorker();
+  const { data:{ text } } = await worker.recognize(dataUrl);
+  return text;
 }
 
 /* ---------------- 영수증 텍스트 파싱 ---------------- */
