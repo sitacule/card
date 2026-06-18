@@ -318,8 +318,12 @@
     <div class="card">
       <h2>계정별 예산 / 사용 / 잔액</h2>
       <div id="budgetTable"></div>
-      <p class="hint">예산 금액은 입력하면 자동 저장되어 다른 기기에서도 동일하게 보입니다.</p>
-      <button class="btn btn-ghost btn-sm" id="btnCopyBudget" style="margin-top:6px;">↩ 지난달 예산 불러오기</button>
+      <p class="hint" id="budgetHint">‘수정’을 눌러 예산을 입력한 뒤 ‘저장’을 누르세요.</p>
+      <div class="btn-group" style="margin-top:6px;">
+        <button class="btn btn-ghost btn-sm" id="btnCopyBudget">↩ 지난달 예산 불러오기</button>
+        <button class="btn btn-ghost btn-sm" id="btnEditBudget">✏️ 수정</button>
+        <button class="btn btn-primary btn-sm" id="btnSaveBudget" style="display:none;">저장</button>
+      </div>
     </div>
     <div class="card" id="budgetTotal" style="text-align:center;"></div>
   </section>
@@ -1104,38 +1108,69 @@ function usedByCategory(month, cat){
                  .reduce((s,r)=>s+(r.amount||0), 0);
 }
 
+let budgetEditing = false;
 function renderBudget(){
   const monthEl = $('#budgetMonth');
   if(!monthEl.value) monthEl.value = thisMonthLocal();
   const month = monthEl.value;
   const monthBudget = budgets[month] || {};
+  budgetEditing = false;   // 월을 새로 그릴 땐 보기 모드
 
   $('#budgetTable').innerHTML = CATEGORIES.map((cat)=>`
       <div class="bud-item">
         <div class="cat">${esc(cat)}</div>
         <div class="ln">
           <label>예산</label>
-          <input type="number" inputmode="numeric" data-cat="${esc(cat)}" value="${monthBudget[cat]||''}" placeholder="0">
+          <input type="text" inputmode="numeric" data-cat="${esc(cat)}" value="${monthBudget[cat]? monthBudget[cat].toLocaleString('ko-KR'):''}" placeholder="0" disabled>
+          <span style="font-size:13px; color:var(--muted);">원</span>
         </div>
         <div class="bud-bar"><i></i></div>
         <div class="bud-stat"><span class="used"></span><span class="rem"></span></div>
       </div>`).join('');
 
-  let saveTimer = null;
+  // 천단위 콤마 자동 표시
   $('#budgetTable').querySelectorAll('input[data-cat]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
-      if(!budgets[month]) budgets[month] = {};
-      budgets[month][inp.dataset.cat] = parseInt(inp.value||'0',10);
-      updateBudgetStats(month);
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(()=>{
-        db.collection('users').doc(uid).collection('budgets').doc(month)
-          .set(budgets[month]).catch(e=>console.error(e));
-      }, 600);
+      const d = inp.value.replace(/[^0-9]/g,'');
+      inp.value = d ? parseInt(d,10).toLocaleString('ko-KR') : '';
     });
   });
+  setBudgetMode(false);
   updateBudgetStats(month);
 }
+
+// 보기/수정 모드 전환
+function setBudgetMode(editing){
+  budgetEditing = editing;
+  $('#budgetTable').querySelectorAll('input[data-cat]').forEach(inp=> inp.disabled = !editing);
+  $('#btnEditBudget').style.display = editing ? 'none' : '';
+  $('#btnSaveBudget').style.display = editing ? '' : 'none';
+  $('#btnCopyBudget').style.display = editing ? '' : 'none';
+  $('#budgetHint').textContent = editing
+    ? '예산 금액을 입력한 뒤 ‘저장’을 누르세요.'
+    : '‘수정’을 눌러 예산을 입력/변경할 수 있습니다.';
+}
+$('#btnEditBudget').onclick = ()=>{
+  setBudgetMode(true);
+  const first = $('#budgetTable').querySelector('input[data-cat]');
+  if(first) first.focus();
+};
+$('#btnSaveBudget').onclick = async ()=>{
+  const month = $('#budgetMonth').value;
+  const obj = {};
+  $('#budgetTable').querySelectorAll('input[data-cat]').forEach(inp=>{
+    const v = parseInt(inp.value.replace(/[^0-9]/g,''),10) || 0;
+    if(v>0) obj[inp.dataset.cat] = v;
+  });
+  $('#btnSaveBudget').disabled = true;
+  try{
+    await db.collection('users').doc(uid).collection('budgets').doc(month).set(obj);
+    budgets[month] = obj;
+    setBudgetMode(false);
+    updateBudgetStats(month);
+  }catch(e){ alert('저장 실패: '+(e.message||e.code)); }
+  finally{ $('#btnSaveBudget').disabled = false; }
+};
 
 function updateBudgetStats(month){
   if(!month) return;
@@ -1156,11 +1191,9 @@ function updateBudgetStats(month){
     item.querySelector('.used').textContent = `사용 ${fmt(used)}원${bud>0?` (${pct}%)`:''}`;
     item.querySelector('.rem').innerHTML = `잔액 <b class="${rem<0?'rem-over':'rem-ok'}">${fmt(rem)}원</b>`;
   });
-  const totRem = totBudget - totUsed;
-  $('#budgetTotal').innerHTML = (totBudget||totUsed)
-    ? `<div style="font-size:13px; color:var(--muted); margin-bottom:6px;">${month} 합계</div>
-       <div style="font-size:15px;">예산 <b>${fmt(totBudget)}</b> · 사용 <b>${fmt(totUsed)}</b> · 잔액 <b class="${totRem<0?'rem-over':'rem-ok'}">${fmt(totRem)}원</b></div>`
-    : `<div class="empty" style="padding:10px;">위에서 계정별 예산을 입력하세요.</div>`;
+  $('#budgetTotal').innerHTML =
+    `<div style="font-size:13px; color:var(--muted); margin-bottom:6px;">${month} 총 사용액</div>
+     <div style="font-size:20px;"><b>${fmt(totUsed)}원</b></div>`;
 }
 
 $('#budgetMonth').addEventListener('change', renderBudget);
@@ -1174,7 +1207,8 @@ $('#btnCopyBudget').onclick = async ()=>{
     alert(`${prevKey} 예산이 없어 불러올 수 없습니다.`); return;
   }
   try{
-    await db.collection('users').doc(uid).collection('budgets').doc(month).set({...budgets[prevKey]});
+    budgets[month] = {...budgets[prevKey]};
+    await db.collection('users').doc(uid).collection('budgets').doc(month).set(budgets[month]);
     renderBudget();
   }catch(e){ alert('불러오기 실패: '+(e.message||e.code)); }
 };
