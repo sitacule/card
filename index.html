@@ -276,6 +276,8 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
 
 /* ---------------- 사진 없이 직접 입력 ---------------- */
 $('#btnManual').onclick = ()=>{
+  editingId = null;
+  $('#btnSave').textContent = '저장하기';
   currentImage = null;
   $('#preview').innerHTML = '';
   hideStatus();
@@ -339,6 +341,7 @@ function fileToCompressedBase64(file, maxSize=1600, quality=0.85){
 }
 
 let currentImage = null; // 현재 인식 중인 이미지 dataURL
+let editingId = null;    // 수정 중인 항목 id (없으면 신규)
 
 /* ---------------- 파일 선택 → OCR ---------------- */
 $('#fileInput').addEventListener('change', async (e)=>{
@@ -355,6 +358,8 @@ $('#fileInput').addEventListener('change', async (e)=>{
     const text = await runOCR(dataUrl);
     const parsed = parseReceipt(text);
 
+    editingId = null;
+    $('#btnSave').textContent = '저장하기';
     $('#rawText').textContent = text || '(인식된 텍스트 없음)';
     $('#f-store').value  = parsed.store;
     $('#f-date').value   = parsed.date;
@@ -448,8 +453,7 @@ function loadData(){ try{return JSON.parse(localStorage.getItem(KEY_DATA))||[];}
 function saveData(d){ localStorage.setItem(KEY_DATA, JSON.stringify(d)); }
 
 $('#btnSave').onclick = ()=>{
-  const rec = {
-    id: Date.now(),
+  const fields = {
     store: $('#f-store').value.trim() || '(미입력)',
     date: $('#f-date').value || new Date().toISOString().slice(0,10),
     amount: parseInt($('#f-amount').value||'0',10),
@@ -462,15 +466,23 @@ $('#btnSave').onclick = ()=>{
     image: currentImage
   };
   const data = loadData();
-  data.unshift(rec);
+  if(editingId){
+    const idx = data.findIndex(x=>x.id == editingId);
+    if(idx > -1) data[idx] = { ...data[idx], ...fields };
+    showStatus('ok','수정되었습니다. ‘내역’ 탭에서 확인하세요.');
+  }else{
+    data.unshift({ id: Date.now(), ...fields });
+    showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
+  }
   saveData(data);
   resetScan();
-  showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
 };
 
 $('#btnDiscard').onclick = resetScan;
 function resetScan(){
   currentImage=null;
+  editingId=null;
+  $('#btnSave').textContent='저장하기';
   $('#preview').innerHTML='';
   $('#resultCard').style.display='none';
   $('#rawText').textContent='';
@@ -507,11 +519,13 @@ function renderList(){
         </div>
       </div>
       <div class="actions">
+        <button class="btn btn-ghost btn-sm" data-edit="${r.id}">✏️ 수정</button>
         <button class="btn btn-danger btn-sm" data-del="${r.id}">삭제</button>
       </div>
     </div>
   `).join('');
 
+  list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit));
   list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
     if(!confirm('이 영수증을 삭제할까요?')) return;
     saveData(loadData().filter(x=>x.id!=b.dataset.del));
@@ -523,6 +537,33 @@ function renderList(){
   });
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------------- 기존 항목 수정 ---------------- */
+function openEditor(id){
+  const rec = loadData().find(x=>x.id == id);
+  if(!rec) return;
+  document.querySelector('.tabbar button[data-view="scan"]').click(); // 촬영 탭으로 이동
+
+  editingId = rec.id;
+  currentImage = rec.image || null;
+  $('#preview').innerHTML = rec.image ? `<img src="${rec.image}" alt="미리보기">` : '';
+  $('#f-store').value = rec.store || '';
+  $('#f-date').value  = rec.date || '';
+  $('#f-amount').value = rec.amount || '';
+  $('#f-bizno').value = rec.bizno || '';
+  $('#f-category').value = CATEGORIES.includes(rec.category) ? rec.category : '기타';
+  $('#f-type').value  = rec.type || '내부';
+  $('#f-company').value = rec.company || '';
+  $('#f-with').value  = rec.withWhom || '';
+  $('#f-memo').value  = rec.memo || '';
+  $('#rawText').textContent = '(저장된 항목 수정 중)';
+  syncTypeUI();
+
+  $('#btnSave').textContent = '수정 저장';
+  $('#resultCard').style.display = 'block';
+  $('#resultCard').scrollIntoView({behavior:'smooth', block:'start'});
+  showStatus('ok','수정 모드입니다. 내용을 고친 뒤 ‘수정 저장’을 누르세요.');
+}
 
 /* ---------------- CSV 내보내기 ---------------- */
 $('#btnExport').onclick = ()=>{
