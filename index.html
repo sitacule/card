@@ -148,11 +148,29 @@
         <div class="field">
           <label>분류</label>
           <select id="f-category">
-            <option>식대</option><option>교통/주유</option><option>비품/소모품</option>
-            <option>접대비</option><option>회의비</option><option>도서/교육</option>
-            <option>통신비</option><option>기타</option>
+            <option>복리_식대(내부)</option>
+            <option>복리_업무활동(외부)</option>
+            <option>교통비</option>
+            <option>기타</option>
           </select>
         </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>구분</label>
+          <select id="f-type">
+            <option value="내부">내부</option>
+            <option value="외부">외부</option>
+          </select>
+        </div>
+        <div class="field" id="company-field" style="display:none;">
+          <label>회사명 (외부)</label>
+          <input type="text" id="f-company" placeholder="상대 회사명">
+        </div>
+      </div>
+      <div class="field">
+        <label>누구와 (동석자)</label>
+        <input type="text" id="f-with" placeholder="예: 홍길동 과장 / 거래처 2명">
       </div>
       <div class="field">
         <label>메모</label>
@@ -221,6 +239,18 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
   });
 });
 
+/* ---------------- 구분(내부/외부) ↔ 회사명/분류 연동 ---------------- */
+function syncTypeUI(){
+  $('#company-field').style.display = ($('#f-type').value === '외부') ? '' : 'none';
+}
+$('#f-type').addEventListener('change', syncTypeUI);
+$('#f-category').addEventListener('change', ()=>{
+  const c = $('#f-category').value;
+  if(c.includes('외부')) $('#f-type').value = '외부';
+  else if(c.includes('내부')) $('#f-type').value = '내부';
+  syncTypeUI();
+});
+
 /* ---------------- 이미지 모달 ---------------- */
 $('#btnCloseImage').onclick = ()=> $('#modalImage').classList.remove('show');
 
@@ -278,7 +308,12 @@ $('#fileInput').addEventListener('change', async (e)=>{
     $('#f-date').value   = parsed.date;
     $('#f-amount').value = parsed.amount || '';
     $('#f-bizno').value  = parsed.bizno;
+    $('#f-category').value = '복리_식대(내부)';
+    $('#f-type').value   = '내부';
+    $('#f-company').value = '';
+    $('#f-with').value   = '';
     $('#f-memo').value   = '';
+    syncTypeUI();
     $('#resultCard').style.display='block';
     showStatus('ok','인식 완료! 내용을 확인하고 저장하세요. (틀린 부분은 직접 수정하세요)');
   }catch(err){
@@ -368,6 +403,9 @@ $('#btnSave').onclick = ()=>{
     amount: parseInt($('#f-amount').value||'0',10),
     bizno: $('#f-bizno').value.trim(),
     category: $('#f-category').value,
+    type: $('#f-type').value,
+    company: $('#f-type').value === '외부' ? $('#f-company').value.trim() : '',
+    withWhom: $('#f-with').value.trim(),
     memo: $('#f-memo').value.trim(),
     image: currentImage
   };
@@ -411,7 +449,8 @@ function renderList(){
             <span class="store">${esc(r.store)}</span>
             <span class="amt">${fmt(r.amount)}원</span>
           </div>
-          <div class="meta">${r.date} · ${esc(r.category)}${r.bizno?' · '+r.bizno:''}</div>
+          <div class="meta">${r.date} · ${esc(r.category)}${r.type?' · '+esc(r.type):''}${r.company?' · '+esc(r.company):''}</div>
+          ${r.withWhom?`<div class="meta">👥 ${esc(r.withWhom)}</div>`:''}
           ${r.memo?`<div class="meta">📝 ${esc(r.memo)}</div>`:''}
         </div>
       </div>
@@ -437,8 +476,8 @@ function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>
 $('#btnExport').onclick = ()=>{
   const data = loadData();
   if(!data.length){ alert('내보낼 내역이 없습니다.'); return; }
-  const header = ['사용일자','가맹점','금액','분류','사업자번호','메모'];
-  const rows = data.map(r=>[r.date,r.store,r.amount,r.category,r.bizno,r.memo]
+  const header = ['사용일자','가맹점','금액','분류','구분','회사명','동석자','사업자번호','메모'];
+  const rows = data.map(r=>[r.date,r.store,r.amount,r.category,r.type,r.company,r.withWhom,r.bizno,r.memo]
     .map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
   const csv = '﻿'+header.join(',')+'\n'+rows.join('\n'); // BOM(엑셀 한글)
   const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
