@@ -2,9 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#2563eb">
-<title>법인카드 영수증 인식</title>
+<title>법인카드 영수증</title>
 <style>
   :root{
     --bg:#f4f6fb; --card:#ffffff; --line:#e5e9f2; --text:#1e293b;
@@ -23,9 +23,10 @@
     justify-content:space-between; box-shadow:0 2px 8px rgba(37,99,235,.25);
   }
   header h1{font-size:17px; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;}
-  header button{
+  header .who{display:flex; align-items:center; gap:8px; font-size:11px;}
+  header .who button{
     background:rgba(255,255,255,.18); color:#fff; border:none; border-radius:8px;
-    padding:7px 10px; font-size:13px; cursor:pointer;
+    padding:6px 9px; font-size:11px; cursor:pointer;
   }
   main{max-width:720px; margin:0 auto; padding:16px;}
   .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(15,23,42,.04);}
@@ -62,6 +63,7 @@
   .btn{display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:12px 16px; border:none; border-radius:10px; font-size:15px; font-weight:700; cursor:pointer; width:100%;}
   .btn-primary{background:var(--primary); color:#fff;}
   .btn-primary:active{background:var(--primary-dark);}
+  .btn-primary:disabled{opacity:.5;}
   .btn-ghost{background:#fff; color:var(--text); border:1px solid var(--line);}
   .btn-danger{background:#fff; color:var(--danger); border:1px solid #fecaca;}
   .btn-sm{padding:8px 12px; font-size:13px; width:auto;}
@@ -89,7 +91,6 @@
   .modal img{max-width:100%; border-radius:10px;}
 
   .hint{font-size:12px; color:var(--muted); margin-top:6px;}
-  a.link{color:var(--primary); text-decoration:none;}
   .tabbar{position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); display:flex; z-index:30;}
   .tabbar button{flex:1; background:none; border:none; padding:10px 0 12px; font-size:11px; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px;}
   .tabbar button.active{color:var(--primary); font-weight:700;}
@@ -109,16 +110,72 @@
   .bud-stat{font-size:13px; margin-top:8px; display:flex; justify-content:space-between; align-items:center;}
   .bud-stat b{font-weight:800;}
   .rem-ok{color:var(--ok);} .rem-over{color:var(--danger);}
+
+  /* 로그인 화면 */
+  #authGate{position:fixed; inset:0; background:var(--bg); z-index:100; display:none; align-items:center; justify-content:center; padding:18px;}
+  #authGate .box{background:#fff; border:1px solid var(--line); border-radius:16px; padding:24px 20px; width:100%; max-width:380px; box-shadow:0 8px 30px rgba(15,23,42,.08);}
+  #authGate h2{margin:0 0 4px; font-size:20px; text-align:center;}
+  #authGate p.sub{margin:0 0 18px; text-align:center; color:var(--muted); font-size:13px;}
+  #authGate .field input{font-size:16px;}
+  #authMsg{font-size:13px; margin-top:10px; min-height:18px;}
+  #authMsg.err{color:var(--danger);} #authMsg.ok{color:var(--ok);}
+  .toggle-auth{text-align:center; margin-top:14px; font-size:13px; color:var(--muted);}
+  .toggle-auth a{color:var(--primary); cursor:pointer; font-weight:700;}
+  .setup{font-size:13px; line-height:1.7; color:var(--text);}
+  .setup code{background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:12px;}
 </style>
+
+<!-- Firebase (compat SDK) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- Tesseract.js OCR (무료, 브라우저 내장) -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
+
+<!-- ============ 로그인 화면 ============ -->
+<div id="authGate">
+  <div class="box">
+    <div id="authForm">
+      <h2>법인카드 영수증</h2>
+      <p class="sub" id="authSub">회사 이메일로 로그인하세요</p>
+      <div class="field">
+        <label>이메일</label>
+        <input type="email" id="authEmail" autocomplete="username" placeholder="name@company.com">
+      </div>
+      <div class="field">
+        <label>비밀번호</label>
+        <input type="password" id="authPw" autocomplete="current-password" placeholder="6자 이상">
+      </div>
+      <button class="btn btn-primary" id="btnAuth">로그인</button>
+      <div id="authMsg"></div>
+      <div class="toggle-auth" id="toggleAuth">
+        계정이 없으신가요? <a id="toggleLink">회원가입</a>
+      </div>
+    </div>
+    <div id="setupNotice" style="display:none;">
+      <h2>설정 필요</h2>
+      <p class="sub">관리자 설정이 아직 완료되지 않았습니다.</p>
+      <div class="setup">
+        이 앱을 쓰려면 <code>index.html</code> 상단의 <code>firebaseConfig</code> 값을
+        본인 Firebase 프로젝트 설정값으로 교체해야 합니다. (아래 안내 참고)
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 앱 본체 ============ -->
+<div id="app" style="display:none;">
 <header>
   <h1>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
     법인카드 영수증
   </h1>
-  <span style="font-size:11px; opacity:.85;">무료 OCR · 설치 불필요</span>
+  <div class="who">
+    <span id="userEmail"></span>
+    <button id="btnLogout">로그아웃</button>
+  </div>
 </header>
 
 <main>
@@ -210,10 +267,9 @@
     <div class="card" style="padding:12px;">
       <div class="btn-group">
         <button class="btn btn-ghost btn-sm" id="btnExport">📤 CSV 내보내기</button>
-        <button class="btn btn-danger btn-sm" id="btnClearAll">전체 삭제</button>
       </div>
     </div>
-    <div id="list"></div>
+    <div id="list"><div class="empty">불러오는 중...</div></div>
   </section>
 
   <!-- ============ 예산 화면 ============ -->
@@ -225,7 +281,7 @@
     <div class="card">
       <h2>계정별 예산 / 사용 / 잔액</h2>
       <div id="budgetTable"></div>
-      <p class="hint">예산 금액은 입력하는 즉시 해당 월에 자동 저장됩니다.</p>
+      <p class="hint">예산 금액은 입력하면 자동 저장되어 다른 기기에서도 동일하게 보입니다.</p>
       <button class="btn btn-ghost btn-sm" id="btnCopyBudget" style="margin-top:6px;">↩ 지난달 예산 불러오기</button>
     </div>
     <div class="card" id="budgetTotal" style="text-align:center;"></div>
@@ -247,6 +303,7 @@
     예산
   </button>
 </nav>
+</div><!-- /#app -->
 
 <!-- 이미지 확대 모달 -->
 <div class="modal" id="modalImage">
@@ -257,10 +314,129 @@
 </div>
 
 <script>
+/* ============================================================
+   ① Firebase 설정 — 본인 프로젝트 값으로 교체하세요
+   Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹) → SDK 설정/구성
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "PASTE_API_KEY",
+  authDomain: "PASTE_PROJECT.firebaseapp.com",
+  projectId: "PASTE_PROJECT",
+  storageBucket: "PASTE_PROJECT.appspot.com",
+  messagingSenderId: "PASTE_SENDER_ID",
+  appId: "PASTE_APP_ID"
+};
+const CONFIG_READY = !firebaseConfig.apiKey.startsWith("PASTE");
+
 const $ = s => document.querySelector(s);
-const KEY_DATA = 'cc_receipts';
-const KEY_BUDGET = 'cc_budgets';
 const CATEGORIES = ['복리_식대(내부)','복리_업무활동(외부)','교통비','기타'];
+
+let db = null, auth = null, uid = null;
+let receipts = [];   // 클라우드에서 동기화된 내역 캐시
+let budgets = {};    // 월별 예산 캐시 { '2026-06': {분류:금액} }
+let unsubR = null, unsubB = null;
+let currentView = 'scan';
+let currentImage = null;
+let editingId = null;
+
+/* ---------------- Firebase 초기화 + 로그인 상태 ---------------- */
+if(CONFIG_READY){
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  // 오프라인 캐시(네트워크가 끊겨도 보기/입력 가능, 복구 시 동기화)
+  db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+
+  auth.onAuthStateChanged(user=>{
+    if(user){ onLogin(user); } else { onLogout(); }
+  });
+} else {
+  // 설정 미완료: 설정 안내 노출
+  $('#authGate').style.display='flex';
+  $('#authForm').style.display='none';
+  $('#setupNotice').style.display='block';
+}
+
+function onLogin(user){
+  uid = user.uid;
+  $('#authGate').style.display='none';
+  $('#app').style.display='block';
+  $('#userEmail').textContent = user.email;
+  subscribe();
+}
+function onLogout(){
+  uid = null; receipts = []; budgets = {};
+  if(unsubR){unsubR(); unsubR=null;}
+  if(unsubB){unsubB(); unsubB=null;}
+  $('#app').style.display='none';
+  $('#authGate').style.display='flex';
+  $('#authForm').style.display='block';
+  $('#setupNotice').style.display='none';
+}
+
+/* ---------------- 실시간 동기화 구독 ---------------- */
+function subscribe(){
+  const base = db.collection('users').doc(uid);
+  unsubR = base.collection('receipts').orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      receipts = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+      if(currentView==='list') renderList();
+      if(currentView==='budget') updateBudgetStats($('#budgetMonth').value);
+    }, err=>console.error(err));
+  unsubB = base.collection('budgets')
+    .onSnapshot(snap=>{
+      budgets = {};
+      snap.docs.forEach(d=> budgets[d.id] = d.data());
+      if(currentView==='budget') updateBudgetStats($('#budgetMonth').value);
+    }, err=>console.error(err));
+}
+
+/* ---------------- 로그인 / 회원가입 ---------------- */
+let signupMode = false;
+// 이벤트 위임: innerHTML 교체로 링크가 새로 생겨도 동작 유지
+$('#toggleAuth').addEventListener('click', e=>{
+  if(e.target.id !== 'toggleLink') return;
+  signupMode = !signupMode;
+  $('#btnAuth').textContent = signupMode ? '회원가입' : '로그인';
+  $('#authSub').textContent = signupMode ? '회사 이메일로 계정을 만드세요' : '회사 이메일로 로그인하세요';
+  $('#toggleAuth').innerHTML = signupMode
+    ? '이미 계정이 있으신가요? <a id="toggleLink">로그인</a>'
+    : '계정이 없으신가요? <a id="toggleLink">회원가입</a>';
+  $('#authMsg').textContent='';
+});
+
+function authError(code){
+  const map = {
+    'auth/invalid-email':'이메일 형식이 올바르지 않습니다.',
+    'auth/missing-password':'비밀번호를 입력하세요.',
+    'auth/weak-password':'비밀번호는 6자 이상이어야 합니다.',
+    'auth/email-already-in-use':'이미 가입된 이메일입니다. 로그인하세요.',
+    'auth/invalid-credential':'이메일 또는 비밀번호가 올바르지 않습니다.',
+    'auth/user-not-found':'가입되지 않은 이메일입니다.',
+    'auth/wrong-password':'비밀번호가 올바르지 않습니다.',
+    'auth/too-many-requests':'시도가 많습니다. 잠시 후 다시 시도하세요.'
+  };
+  return map[code] || ('오류: '+code);
+}
+$('#btnAuth').onclick = async ()=>{
+  const email = $('#authEmail').value.trim();
+  const pw = $('#authPw').value;
+  const msg = $('#authMsg');
+  msg.className=''; msg.textContent='처리 중...';
+  $('#btnAuth').disabled = true;
+  try{
+    if(signupMode) await auth.createUserWithEmailAndPassword(email, pw);
+    else await auth.signInWithEmailAndPassword(email, pw);
+    msg.textContent='';
+  }catch(e){
+    msg.className='err'; msg.textContent = authError(e.code);
+  }finally{
+    $('#btnAuth').disabled = false;
+  }
+};
+$('#authPw').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btnAuth').click(); });
+$('#btnLogout').onclick = ()=>{ if(confirm('로그아웃할까요?')) auth.signOut(); };
 
 /* ---------------- 화면 전환 ---------------- */
 document.querySelectorAll('.tabbar button').forEach(b=>{
@@ -268,9 +444,10 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
     document.querySelectorAll('.tabbar button').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
-    $('#view-'+b.dataset.view).classList.add('active');
-    if(b.dataset.view==='list') renderList();
-    if(b.dataset.view==='budget') renderBudget();
+    currentView = b.dataset.view;
+    $('#view-'+currentView).classList.add('active');
+    if(currentView==='list') renderList();
+    if(currentView==='budget') renderBudget();
   });
 });
 
@@ -309,15 +486,11 @@ $('#f-category').addEventListener('change', ()=>{
 $('#btnCloseImage').onclick = ()=> $('#modalImage').classList.remove('show');
 
 /* ---------------- 상태 표시 ---------------- */
-function showStatus(type,msg){
-  const el = $('#status');
-  el.className = 'status show '+type;
-  el.textContent = msg;
-}
+function showStatus(type,msg){ const el=$('#status'); el.className='status show '+type; el.textContent=msg; }
 function hideStatus(){ $('#status').className='status'; }
 
-/* ---------------- 이미지 → 압축 base64 ---------------- */
-function fileToCompressedBase64(file, maxSize=1600, quality=0.85){
+/* ---------------- 이미지 → 압축 base64 (Firestore 1MB 제한 고려) ---------------- */
+function fileToCompressedBase64(file, maxSize=1200, quality=0.6){
   return new Promise((resolve,reject)=>{
     const img = new Image();
     const reader = new FileReader();
@@ -332,22 +505,17 @@ function fileToCompressedBase64(file, maxSize=1600, quality=0.85){
       const canvas = document.createElement('canvas');
       canvas.width=width; canvas.height=height;
       canvas.getContext('2d').drawImage(img,0,0,width,height);
-      const dataUrl = canvas.toDataURL('image/jpeg', quality);
-      resolve(dataUrl);
+      resolve(canvas.toDataURL('image/jpeg', quality));
     };
     img.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
-let currentImage = null; // 현재 인식 중인 이미지 dataURL
-let editingId = null;    // 수정 중인 항목 id (없으면 신규)
-
 /* ---------------- 파일 선택 → OCR ---------------- */
 $('#fileInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
-
   try{
     const dataUrl = await fileToCompressedBase64(file);
     currentImage = dataUrl;
@@ -381,16 +549,12 @@ $('#fileInput').addEventListener('change', async (e)=>{
   }
 });
 
-/* ---------------- Tesseract.js OCR (무료, 브라우저 내장) ---------------- */
+/* ---------------- Tesseract.js OCR ---------------- */
 let ocrWorker = null;
 async function getWorker(){
   if(ocrWorker) return ocrWorker;
   ocrWorker = await Tesseract.createWorker(['kor','eng'], 1, {
-    logger: m => {
-      if(m.status === 'recognizing text'){
-        showStatus('loading', `영수증 인식 중... ${Math.round(m.progress*100)}%`);
-      }
-    }
+    logger: m => { if(m.status==='recognizing text') showStatus('loading', `영수증 인식 중... ${Math.round(m.progress*100)}%`); }
   });
   return ocrWorker;
 }
@@ -406,18 +570,12 @@ function parseReceipt(text){
   if(!text) return result;
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
 
-  // 사업자번호 000-00-00000
   const bizMatch = text.match(/\b\d{3}-\d{2}-\d{5}\b/);
   if(bizMatch) result.bizno = bizMatch[0];
 
-  // 날짜: YYYY-MM-DD / YYYY.MM.DD / YYYY/MM/DD / YYYY년 MM월 DD일
   let dm = text.match(/(20\d{2})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
-  if(dm){
-    const y=dm[1], mo=dm[2].padStart(2,'0'), d=dm[3].padStart(2,'0');
-    result.date = `${y}-${mo}-${d}`;
-  }
+  if(dm){ result.date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`; }
 
-  // 금액: '합계/총액/결제/받을금액/판매' 키워드 우선, 없으면 최대 금액
   const amountKeywords = /(합\s*계|총\s*액|결제\s*금액|받을\s*금액|승인\s*금액|판매\s*금액|총\s*구매|합계금액|금\s*액)/;
   const numRe = /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,})/g;
   let best = 0, keyworded = 0;
@@ -432,27 +590,18 @@ function parseReceipt(text){
   });
   result.amount = keyworded || best || 0;
 
-  // 상호: 키워드 라벨 옆, 없으면 상단부 의미있는 줄
   let storeLine = lines.find(l=>/(상\s*호|가\s*맹\s*점|점\s*명)/.test(l));
-  if(storeLine){
-    result.store = storeLine.replace(/.*(상\s*호|가\s*맹\s*점|점\s*명)\s*[:：]?/,'').trim();
-  }
+  if(storeLine){ result.store = storeLine.replace(/.*(상\s*호|가\s*맹\s*점|점\s*명)\s*[:：]?/,'').trim(); }
   if(!result.store){
-    const cand = lines.find(l=>
-      l.length>=2 && l.length<=25 &&
-      !/^\d/.test(l) && !/\d{3}-\d{2}-\d{5}/.test(l) &&
-      !/(영수증|사업자|대표자|전화|주소|tel|http)/i.test(l)
-    );
+    const cand = lines.find(l=> l.length>=2 && l.length<=25 && !/^\d/.test(l) && !/\d{3}-\d{2}-\d{5}/.test(l) && !/(영수증|사업자|대표자|전화|주소|tel|http)/i.test(l));
     result.store = cand || lines[0] || '';
   }
   return result;
 }
 
-/* ---------------- 저장 ---------------- */
-function loadData(){ try{return JSON.parse(localStorage.getItem(KEY_DATA))||[];}catch{return [];} }
-function saveData(d){ localStorage.setItem(KEY_DATA, JSON.stringify(d)); }
-
-$('#btnSave').onclick = ()=>{
+/* ---------------- 저장 / 수정 (Firestore) ---------------- */
+$('#btnSave').onclick = async ()=>{
+  if(!uid){ showStatus('error','로그인이 필요합니다.'); return; }
   const fields = {
     store: $('#f-store').value.trim() || '(미입력)',
     date: $('#f-date').value || new Date().toISOString().slice(0,10),
@@ -463,25 +612,30 @@ $('#btnSave').onclick = ()=>{
     company: $('#f-type').value === '외부' ? $('#f-company').value.trim() : '',
     withWhom: $('#f-with').value.trim(),
     memo: $('#f-memo').value.trim(),
-    image: currentImage
+    image: currentImage || ''
   };
-  const data = loadData();
-  if(editingId){
-    const idx = data.findIndex(x=>x.id == editingId);
-    if(idx > -1) data[idx] = { ...data[idx], ...fields };
-    showStatus('ok','수정되었습니다. ‘내역’ 탭에서 확인하세요.');
-  }else{
-    data.unshift({ id: Date.now(), ...fields });
-    showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
+  const col = db.collection('users').doc(uid).collection('receipts');
+  $('#btnSave').disabled = true;
+  try{
+    if(editingId){
+      await col.doc(editingId).update(fields);
+      showStatus('ok','수정되었습니다. ‘내역’ 탭에서 확인하세요.');
+    }else{
+      await col.add({ ...fields, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      showStatus('ok','저장되었습니다. ‘내역’ 탭에서 확인하세요.');
+    }
+    resetScan();
+  }catch(e){
+    console.error(e);
+    showStatus('error','저장 실패: '+(e.message||e.code));
+  }finally{
+    $('#btnSave').disabled = false;
   }
-  saveData(data);
-  resetScan();
 };
 
 $('#btnDiscard').onclick = resetScan;
 function resetScan(){
-  currentImage=null;
-  editingId=null;
+  currentImage=null; editingId=null;
   $('#btnSave').textContent='저장하기';
   $('#preview').innerHTML='';
   $('#resultCard').style.display='none';
@@ -491,21 +645,19 @@ function resetScan(){
 
 /* ---------------- 목록 렌더 ---------------- */
 function fmt(n){ return (n||0).toLocaleString('ko-KR'); }
+function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function renderList(){
-  const data = loadData();
   const list = $('#list');
-  $('#sumCount').textContent = data.length;
-  const total = data.reduce((s,r)=>s+(r.amount||0),0);
-  $('#sumAmount').textContent = fmt(total);
+  $('#sumCount').textContent = receipts.length;
+  $('#sumAmount').textContent = fmt(receipts.reduce((s,r)=>s+(r.amount||0),0));
   const ym = new Date().toISOString().slice(0,7);
-  const monthTotal = data.filter(r=>(r.date||'').startsWith(ym)).reduce((s,r)=>s+(r.amount||0),0);
-  $('#sumMonth').textContent = fmt(monthTotal);
+  $('#sumMonth').textContent = fmt(receipts.filter(r=>(r.date||'').startsWith(ym)).reduce((s,r)=>s+(r.amount||0),0));
 
-  if(!data.length){ list.innerHTML = '<div class="empty">저장된 영수증이 없습니다.<br>‘촬영’ 탭에서 영수증을 찍어보세요.</div>'; return; }
+  if(!receipts.length){ list.innerHTML = '<div class="empty">저장된 영수증이 없습니다.<br>‘촬영’ 탭에서 영수증을 찍어보세요.</div>'; return; }
 
-  list.innerHTML = data.map(r=>`
-    <div class="item" data-id="${r.id}">
+  list.innerHTML = receipts.map(r=>`
+    <div class="item">
       <div class="item-head">
         ${r.image?`<img class="thumb" src="${r.image}" data-img="${r.id}" alt="">`:''}
         <div style="flex:1;">
@@ -513,7 +665,7 @@ function renderList(){
             <span class="store">${esc(r.store)}</span>
             <span class="amt">${fmt(r.amount)}원</span>
           </div>
-          <div class="meta">${r.date} · ${esc(r.category)}${r.type?' · '+esc(r.type):''}${r.company?' · '+esc(r.company):''}</div>
+          <div class="meta">${esc(r.date)} · ${esc(r.category)}${r.type?' · '+esc(r.type):''}${r.company?' · '+esc(r.company):''}</div>
           ${r.withWhom?`<div class="meta">👥 ${esc(r.withWhom)}</div>`:''}
           ${r.memo?`<div class="meta">📝 ${esc(r.memo)}</div>`:''}
         </div>
@@ -522,27 +674,25 @@ function renderList(){
         <button class="btn btn-ghost btn-sm" data-edit="${r.id}">✏️ 수정</button>
         <button class="btn btn-danger btn-sm" data-del="${r.id}">삭제</button>
       </div>
-    </div>
-  `).join('');
+    </div>`).join('');
 
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit));
-  list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+  list.querySelectorAll('[data-del]').forEach(b=>b.onclick=async ()=>{
     if(!confirm('이 영수증을 삭제할까요?')) return;
-    saveData(loadData().filter(x=>x.id!=b.dataset.del));
-    renderList();
+    try{ await db.collection('users').doc(uid).collection('receipts').doc(b.dataset.del).delete(); }
+    catch(e){ alert('삭제 실패: '+(e.message||e.code)); }
   });
   list.querySelectorAll('[data-img]').forEach(img=>img.onclick=()=>{
-    const rec = loadData().find(x=>x.id==img.dataset.img);
+    const rec = receipts.find(x=>x.id===img.dataset.img);
     if(rec?.image){ $('#modalImg').src=rec.image; $('#modalImage').classList.add('show'); }
   });
 }
-function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 /* ---------------- 기존 항목 수정 ---------------- */
 function openEditor(id){
-  const rec = loadData().find(x=>x.id == id);
+  const rec = receipts.find(x=>x.id === id);
   if(!rec) return;
-  document.querySelector('.tabbar button[data-view="scan"]').click(); // 촬영 탭으로 이동
+  document.querySelector('.tabbar button[data-view="scan"]').click();
 
   editingId = rec.id;
   currentImage = rec.image || null;
@@ -558,7 +708,6 @@ function openEditor(id){
   $('#f-memo').value  = rec.memo || '';
   $('#rawText').textContent = '(저장된 항목 수정 중)';
   syncTypeUI();
-
   $('#btnSave').textContent = '수정 저장';
   $('#resultCard').style.display = 'block';
   $('#resultCard').scrollIntoView({behavior:'smooth', block:'start'});
@@ -567,12 +716,11 @@ function openEditor(id){
 
 /* ---------------- CSV 내보내기 ---------------- */
 $('#btnExport').onclick = ()=>{
-  const data = loadData();
-  if(!data.length){ alert('내보낼 내역이 없습니다.'); return; }
+  if(!receipts.length){ alert('내보낼 내역이 없습니다.'); return; }
   const header = ['사용일자','가맹점','금액','분류','구분','회사명','동석자','사업자번호','메모'];
-  const rows = data.map(r=>[r.date,r.store,r.amount,r.category,r.type,r.company,r.withWhom,r.bizno,r.memo]
+  const rows = receipts.map(r=>[r.date,r.store,r.amount,r.category,r.type,r.company,r.withWhom,r.bizno,r.memo]
     .map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  const csv = '﻿'+header.join(',')+'\n'+rows.join('\n'); // BOM(엑셀 한글)
+  const csv = '﻿'+header.join(',')+'\n'+rows.join('\n');
   const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -580,66 +728,52 @@ $('#btnExport').onclick = ()=>{
   a.click();
 };
 
-$('#btnClearAll').onclick = ()=>{
-  if(!loadData().length) return;
-  if(confirm('모든 영수증 내역을 삭제할까요? 되돌릴 수 없습니다.')){
-    saveData([]); renderList();
-  }
-};
-
-/* ---------------- 월별 예산 ---------------- */
-function loadBudgets(){ try{return JSON.parse(localStorage.getItem(KEY_BUDGET))||{};}catch{return {};} }
-function saveBudgets(b){ localStorage.setItem(KEY_BUDGET, JSON.stringify(b)); }
-
-// 해당 월 + 분류의 사용 합계
+/* ---------------- 월별 예산 (Firestore) ---------------- */
 function usedByCategory(month, cat){
-  return loadData()
-    .filter(r => (r.date||'').startsWith(month) && r.category === cat)
-    .reduce((s,r)=>s+(r.amount||0), 0);
+  return receipts.filter(r => (r.date||'').startsWith(month) && r.category === cat)
+                 .reduce((s,r)=>s+(r.amount||0), 0);
 }
 
 function renderBudget(){
   const monthEl = $('#budgetMonth');
   if(!monthEl.value) monthEl.value = new Date().toISOString().slice(0,7);
   const month = monthEl.value;
-  const monthBudget = loadBudgets()[month] || {};
+  const monthBudget = budgets[month] || {};
 
-  $('#budgetTable').innerHTML = CATEGORIES.map((cat,i)=>{
-    const bud = monthBudget[cat] || 0;
-    return `
-      <div class="bud-item" data-i="${i}">
+  $('#budgetTable').innerHTML = CATEGORIES.map((cat)=>`
+      <div class="bud-item">
         <div class="cat">${esc(cat)}</div>
         <div class="ln">
           <label>예산</label>
-          <input type="number" inputmode="numeric" data-cat="${esc(cat)}" value="${bud||''}" placeholder="0">
+          <input type="number" inputmode="numeric" data-cat="${esc(cat)}" value="${monthBudget[cat]||''}" placeholder="0">
         </div>
         <div class="bud-bar"><i></i></div>
-        <div class="bud-stat">
-          <span class="used"></span>
-          <span class="rem"></span>
-        </div>
-      </div>`;
-  }).join('');
+        <div class="bud-stat"><span class="used"></span><span class="rem"></span></div>
+      </div>`).join('');
 
-  // 예산 입력 → 즉시 저장 + 숫자만 갱신(입력란은 그대로 유지)
+  let saveTimer = null;
   $('#budgetTable').querySelectorAll('input[data-cat]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
-      const b = loadBudgets();
-      if(!b[month]) b[month] = {};
-      b[month][inp.dataset.cat] = parseInt(inp.value||'0',10);
-      saveBudgets(b);
+      if(!budgets[month]) budgets[month] = {};
+      budgets[month][inp.dataset.cat] = parseInt(inp.value||'0',10);
       updateBudgetStats(month);
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(()=>{
+        db.collection('users').doc(uid).collection('budgets').doc(month)
+          .set(budgets[month]).catch(e=>console.error(e));
+      }, 600);
     });
   });
-
   updateBudgetStats(month);
 }
 
-// 막대·잔액·합계만 다시 계산 (입력란은 건드리지 않음)
 function updateBudgetStats(month){
-  const monthBudget = loadBudgets()[month] || {};
+  if(!month) return;
+  const monthBudget = budgets[month] || {};
+  const items = $('#budgetTable').querySelectorAll('.bud-item');
+  if(!items.length) return;
   let totBudget=0, totUsed=0;
-  $('#budgetTable').querySelectorAll('.bud-item').forEach((item,i)=>{
+  items.forEach((item,i)=>{
     const cat = CATEGORIES[i];
     const bud = monthBudget[cat] || 0;
     const used = usedByCategory(month, cat);
@@ -648,12 +782,10 @@ function updateBudgetStats(month){
     const pct = bud>0 ? Math.min(100, Math.round(used/bud*100)) : 0;
     const over = bud>0 && used>bud;
     const bar = item.querySelector('.bud-bar>i');
-    bar.style.width = pct+'%';
-    bar.className = over ? 'over' : '';
+    bar.style.width = pct+'%'; bar.className = over ? 'over' : '';
     item.querySelector('.used').textContent = `사용 ${fmt(used)}원${bud>0?` (${pct}%)`:''}`;
     item.querySelector('.rem').innerHTML = `잔액 <b class="${rem<0?'rem-over':'rem-ok'}">${fmt(rem)}원</b>`;
   });
-
   const totRem = totBudget - totUsed;
   $('#budgetTotal').innerHTML = (totBudget||totUsed)
     ? `<div style="font-size:13px; color:var(--muted); margin-bottom:6px;">${month} 합계</div>
@@ -663,18 +795,18 @@ function updateBudgetStats(month){
 
 $('#budgetMonth').addEventListener('change', renderBudget);
 
-$('#btnCopyBudget').onclick = ()=>{
+$('#btnCopyBudget').onclick = async ()=>{
   const month = $('#budgetMonth').value;
   const [y,m] = month.split('-').map(Number);
-  const prev = new Date(y, m-2, 1); // 지난달
+  const prev = new Date(y, m-2, 1);
   const prevKey = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
-  const budgets = loadBudgets();
   if(!budgets[prevKey] || !Object.keys(budgets[prevKey]).length){
     alert(`${prevKey} 예산이 없어 불러올 수 없습니다.`); return;
   }
-  budgets[month] = {...budgets[prevKey]};
-  saveBudgets(budgets);
-  renderBudget();
+  try{
+    await db.collection('users').doc(uid).collection('budgets').doc(month).set({...budgets[prevKey]});
+    renderBudget();
+  }catch(e){ alert('불러오기 실패: '+(e.message||e.code)); }
 };
 
 /* 모달 바깥 클릭 닫기 */
