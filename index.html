@@ -120,12 +120,13 @@
         <small>휴대폰 카메라로 영수증을 찍으면 자동 인식됩니다</small>
       </label>
       <input type="file" id="fileInput" accept="image/*" capture="environment">
+      <button class="btn btn-ghost" id="btnManual" style="margin-top:12px;">✏️ 사진 없이 직접 입력</button>
       <div class="preview" id="preview"></div>
       <div class="status" id="status"></div>
     </div>
 
     <div class="card" id="resultCard" style="display:none;">
-      <h2>2. 인식 결과 확인 / 수정</h2>
+      <h2>2. 내용 확인 / 입력</h2>
       <div class="field">
         <label>가맹점 (상호)</label>
         <input type="text" id="f-store" placeholder="예: 스타벅스 강남점">
@@ -238,6 +239,23 @@ document.querySelectorAll('.tabbar button').forEach(b=>{
     if(b.dataset.view==='list') renderList();
   });
 });
+
+/* ---------------- 사진 없이 직접 입력 ---------------- */
+$('#btnManual').onclick = ()=>{
+  currentImage = null;
+  $('#preview').innerHTML = '';
+  hideStatus();
+  $('#f-store').value='';
+  $('#f-date').value = new Date().toISOString().slice(0,10);
+  $('#f-amount').value=''; $('#f-bizno').value='';
+  $('#f-category').value='복리_식대(내부)'; $('#f-type').value='내부';
+  $('#f-company').value=''; $('#f-with').value=''; $('#f-memo').value='';
+  $('#rawText').textContent='(직접 입력 - 인식된 원문 없음)';
+  syncTypeUI();
+  $('#resultCard').style.display='block';
+  $('#resultCard').scrollIntoView({behavior:'smooth', block:'start'});
+  $('#f-store').focus();
+};
 
 /* ---------------- 구분(내부/외부) ↔ 회사명/분류 연동 ---------------- */
 function syncTypeUI(){
