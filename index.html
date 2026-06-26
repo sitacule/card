@@ -524,7 +524,7 @@ $('#btnAuth').onclick = async ()=>{
   try{
     if(signupMode){
       const cred = await auth.createUserWithEmailAndPassword(email, pw);
-      await cred.user.sendEmailVerification();   // 가입 즉시 인증 메일 발송
+      await cred.user.sendEmailVerification();   // 가입 시 인증 메일 발송(기존 유지)
     } else {
       await auth.signInWithEmailAndPassword(email, pw);
     }
