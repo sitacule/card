@@ -55,10 +55,20 @@
   .shot .cap{flex:1; min-width:220px; font-size:14px;}
   .shot .cap b{color:var(--primary-d);}
   figcaption{text-align:center; font-size:12px; color:var(--muted); margin-top:6px;}
-  @media print{ header.top{box-shadow:none;} body{background:#fff;} .card{box-shadow:none;} }
+  /* 다운로드 버튼 */
+  .dlbar{position:fixed; top:12px; right:12px; z-index:60; display:flex; gap:8px;}
+  .dlbar button{border:none; border-radius:9px; padding:9px 13px; font-size:13px; font-weight:700; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.18);}
+  .dlbar .pdf{background:#fff; color:var(--primary); border:1px solid var(--primary);}
+  .dlbar .save{background:var(--primary); color:#fff;}
+  @media (max-width:520px){ .dlbar{top:8px; right:8px;} .dlbar button{padding:7px 10px; font-size:12px;} }
+  @media print{ header.top{box-shadow:none;} body{background:#fff;} .card{box-shadow:none;} .dlbar{display:none;} }
 </style>
 </head>
 <body>
+<div class="dlbar">
+  <button class="pdf" onclick="window.print()">📄 PDF로 저장</button>
+  <button class="save" onclick="downloadManual()">📥 다운로드</button>
+</div>
 <header class="top">
   <h1>미전연 법카 Trace</h1>
   <p>법인카드 사용 내역 기록 · 관리 앱 사용 매뉴얼</p>
@@ -369,5 +379,23 @@
     미전연 법카 Trace · 사용 매뉴얼 &nbsp;|&nbsp; 접속: https://sitacule.github.io/card/ &nbsp;|&nbsp; By. 조현준
   </div>
 </div>
+<script>
+  // 매뉴얼 HTML 파일을 그대로 내려받기 (오프라인 보관용)
+  function downloadManual(){
+    fetch(location.href).then(r=>r.text()).then(html=>{
+      const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '미전연_법카_Trace_매뉴얼.html';
+      a.click();
+    }).catch(()=>{
+      const blob = new Blob(['<!DOCTYPE html>\n'+document.documentElement.outerHTML], {type:'text/html;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '미전연_법카_Trace_매뉴얼.html';
+      a.click();
+    });
+  }
+</script>
 </body>
 </html>
