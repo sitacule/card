@@ -34,6 +34,7 @@
   ol.steps>li:last-child{padding-bottom:0;}
   .tip{background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; border-radius:10px; padding:10px 14px; margin:12px 0; font-size:14px;}
   .note{background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; border-radius:10px; padding:10px 14px; margin:12px 0; font-size:14px;}
+  .warn{background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px; padding:10px 14px; margin:12px 0; font-size:14px;}
   .key{display:inline-block; background:#f1f5f9; border:1px solid var(--line); border-radius:6px;
     padding:1px 7px; font-size:13px; font-weight:700;}
   .plat{border-radius:14px; overflow:hidden; border:1px solid var(--line); margin:14px 0;}
@@ -188,7 +189,55 @@
         </ol>
       </div>
     </div>
-    <div class="note">📬 재설정 메일이 안 보이면 <b>스팸함/정크메일함</b>을 먼저 확인하세요. 그래도 없으면 이메일 주소가 <b>@lotte.net</b> 으로 정확히 입력됐는지 확인한 뒤 다시 시도해 주세요.</div>
+    <h4 style="margin:20px 0 6px; font-size:15px;">받게 되는 화면 — 재설정 메일 &amp; 새 비밀번호 입력</h4>
+    <div class="shot">
+      <div class="pic">
+        <!-- 재설정 메일 목업 -->
+        <svg width="180" height="360" viewBox="0 0 240 480" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="4" width="232" height="472" rx="34" fill="#0f172a"/>
+          <rect x="12" y="14" width="216" height="452" rx="26" fill="#fff"/>
+          <rect x="96" y="20" width="48" height="9" rx="4.5" fill="#0f172a"/>
+          <rect x="12" y="34" width="216" height="28" fill="#f8fafc"/>
+          <text x="26" y="52" font-size="10" font-weight="700" fill="#1e293b">✉️ 받은편지함</text>
+          <text x="26" y="86" font-size="9" font-weight="700" fill="#1e293b">미전연 법카 Trace</text>
+          <text x="26" y="99" font-size="6.7" fill="#64748b">noreply@card-e3cad.firebaseapp.com</text>
+          <line x1="26" y1="108" x2="214" y2="108" stroke="#eef2f6"/>
+          <text x="26" y="130" font-size="9.5" font-weight="700" fill="#334155">비밀번호 재설정</text>
+          <text x="26" y="152" font-size="8" fill="#475569">아래 버튼을 눌러 새 비밀번호를</text>
+          <text x="26" y="164" font-size="8" fill="#475569">설정하세요.</text>
+          <rect x="26" y="180" width="120" height="30" rx="8" fill="#2563eb"/>
+          <text x="86" y="199" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">비밀번호 재설정</text>
+          <rect x="20" y="174" width="134" height="42" rx="10" fill="none" stroke="#dc2626" stroke-width="2"/>
+          <text x="26" y="238" font-size="7.3" fill="#94a3b8">본인이 요청하지 않았다면 무시하세요.</text>
+        </svg>
+        <figcaption>① 재설정 메일 (보낸사람 확인)</figcaption>
+      </div>
+      <div class="pic">
+        <!-- 새 비밀번호 입력 화면 목업 -->
+        <svg width="180" height="360" viewBox="0 0 240 480" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="4" width="232" height="472" rx="34" fill="#0f172a"/>
+          <rect x="12" y="14" width="216" height="452" rx="26" fill="#eef2f9"/>
+          <rect x="96" y="20" width="48" height="9" rx="4.5" fill="#0f172a"/>
+          <rect x="36" y="130" width="168" height="176" rx="16" fill="#fff" stroke="#e5e9f2"/>
+          <text x="120" y="162" text-anchor="middle" font-size="12" font-weight="700" fill="#1e293b">비밀번호 재설정</text>
+          <text x="120" y="180" text-anchor="middle" font-size="7.5" fill="#64748b">name@lotte.net</text>
+          <text x="52" y="206" font-size="8" fill="#64748b">새 비밀번호</text>
+          <rect x="52" y="211" width="136" height="26" rx="7" fill="#fff" stroke="#e5e9f2"/>
+          <text x="60" y="228" font-size="10" fill="#94a3b8">••••••</text>
+          <rect x="52" y="252" width="136" height="30" rx="8" fill="#2563eb"/>
+          <text x="120" y="271" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">저장</text>
+        </svg>
+        <figcaption>② 새 비밀번호 입력 후 저장</figcaption>
+      </div>
+    </div>
+
+    <div class="warn">
+      ⚠️ <b>스팸으로 처리될 수 있습니다.</b> 이 메일은 <b>noreply@card-e3cad.firebaseapp.com</b> 에서 발송됩니다.
+      <b>스팸함 · 정크메일함 · 프로모션함</b>으로 분류될 수 있으니, 받은편지함에 없으면 그곳을 확인하세요.
+      찾으면 <b>‘스팸 아님’</b> 으로 처리하거나 위 발신 주소를 <b>안전한 보낸사람(수신 허용)</b> 으로 등록해 두면 다음부터 정상 수신됩니다.
+      (메일 제목에는 <b>비밀번호 재설정</b> 또는 영문 <em>Reset your password</em> 가 포함됩니다.)
+    </div>
+    <div class="note">📬 그래도 메일이 없으면 이메일 주소가 <b>@lotte.net</b> 으로 정확히 입력됐는지 확인한 뒤 다시 시도하고, 몇 분 기다려 주세요.</div>
   </div>
 
   <!-- 3 -->
